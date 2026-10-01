@@ -24,19 +24,18 @@ def parse_args():
 
 async def check_service_status() -> None:
     """Check and display the status of the VideoLib launchd service."""
-    import subprocess
     label = "com.videolib.agent"
     print(f"\n{'=' * 50}")
     print("VideoLib Service Status")
     print(f"{'=' * 50}")
-    
+
     # Check if launchd job is loaded
     try:
         result = subprocess.run(
             ["launchctl", "list"],
             capture_output=True, text=True, timeout=5
         )
-        lines = [l for l in result.stdout.splitlines() if label in l]
+        lines = [line for line in result.stdout.splitlines() if label in line]
         if lines:
             parts = lines[0].split()
             pid = parts[0] if parts[0] != "-" else None
@@ -47,19 +46,19 @@ async def check_service_status() -> None:
                 print(f"  Status:  ⚠️  Loaded but not running (exit code: {status_code})")
         else:
             print("  Status:  ❌ Not loaded")
-            print(f"  Hint:    Run 'brew services start videolib' or load the plist manually.")
+            print("  Hint:    Run 'brew services start videolib' or load the plist manually.")
     except FileNotFoundError:
         print("  Status:  ❓ launchctl not found (not macOS?)")
     except subprocess.TimeoutExpired:
         print("  Status:  ❓ launchctl timed out")
-    
+
     # Check config file
     env_file = os.getenv("VIDEOLIB_ENV_FILE", os.path.expanduser("~/.config/videolib/.env"))
     if os.path.exists(env_file):
         print(f"  Config:  ✅ {env_file}")
     else:
         print(f"  Config:  ❌ {env_file} (not found)")
-    
+
     # Check log files
     log_dir = Path(os.path.expanduser("~/Library/Logs/VideoLib"))
     if log_dir.exists():
@@ -70,18 +69,18 @@ async def check_service_status() -> None:
             print(f"           - {lf.name} ({size_kb:.1f} KB)")
     else:
         print(f"  Logs:    📁 {log_dir} (not created yet)")
-    
+
     print(f"{'=' * 50}\n")
 
 async def main() -> None:
     args = parse_args()
-    
+
     # Override configuration flags if specified via CLI
     if args.debug:
         config.DEBUG = True
         setup_logger(level=logging.DEBUG)
         logger.debug("Debug logging enabled via CLI flag.")
-        
+
     if args.keep_files:
         config.KEEP_TMP_FILES = True
         logger.info("Temporary file preservation enabled (KEEP_TMP_FILES=True) via CLI flag.")

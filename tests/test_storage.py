@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 from src.config import config
 from src.storage.manager import StorageManager
 
@@ -14,7 +13,7 @@ def test_generate_path(temp_storage):
     """Verify generated paths are unique, reside in target dir, and end with the correct suffix."""
     path1 = temp_storage.generate_path(".mp4")
     path2 = temp_storage.generate_path("mp4")
-    
+
     assert path1 != path2
     assert path1.parent == temp_storage.download_dir
     assert path1.suffix == ".mp4"
@@ -27,7 +26,7 @@ async def test_cleanup_valid_file(temp_storage):
     path = temp_storage.generate_path(".mp4")
     path.write_text("dummy content")
     assert path.exists()
-    
+
     deleted = await temp_storage.cleanup(path)
     assert deleted is True
     assert not path.exists()
@@ -40,7 +39,7 @@ async def test_cleanup_keep_tmp_files(temp_storage):
         path = temp_storage.generate_path(".mp4")
         path.write_text("dummy content to keep")
         assert path.exists()
-        
+
         deleted = await temp_storage.cleanup(path)
         assert deleted is False
         assert path.exists()  # File MUST remain intact!
@@ -55,7 +54,7 @@ async def test_cleanup_nonexistent_file(temp_storage):
     config.KEEP_TMP_FILES = False
     path = temp_storage.generate_path(".mp4")
     assert not path.exists()
-    
+
     deleted = await temp_storage.cleanup(path)
     assert deleted is False
 
@@ -67,13 +66,13 @@ async def test_cleanup_traversal_protection(temp_storage, tmp_path):
     outside_dir.mkdir(exist_ok=True)
     outside_file = outside_dir / "secret.txt"
     outside_file.write_text("sensitive data")
-    
+
     assert outside_file.exists()
-    
+
     deleted = await temp_storage.cleanup(outside_file)
-    
+
     assert deleted is False
     assert outside_file.exists()
-    
+
     outside_file.unlink()
     outside_dir.rmdir()

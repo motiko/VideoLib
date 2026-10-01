@@ -1,10 +1,11 @@
 from pathlib import Path
+from typing import Any
 from src.platforms.base import BasePlatform
 from src.utils.logger import logger
 
 class CliPlatform(BasePlatform):
     """Platform adapter for command-line interface execution."""
-    
+
     def __init__(self):
         super().__init__("cli")
 
@@ -43,7 +44,7 @@ class CliPlatform(BasePlatform):
     ) -> None:
         """Reports video completion and output file location directly to the terminal."""
         size_mb = file_path.stat().st_size / (1024 * 1024) if file_path.exists() else 0.0
-        print(f"\n🎉 [CLI Deliverable] Video successfully created!")
+        print("\n🎉 [CLI Deliverable] Video successfully created!")
         print(f"   - File Path: {file_path}")
         print(f"   - File Size: {size_mb:.2f} MB")
         if caption:

@@ -1,6 +1,7 @@
 import asyncio
 import html
 import io
+import re
 import time
 from typing import Callable, Coroutine, Any
 from src.platforms.base import BasePlatform
@@ -23,7 +24,6 @@ class DownloadProgress(float):
         obj.size = size
         return obj
 
-import re
 
 def parse_eta_seconds(eta_str: str | None) -> int | None:
     """Parses MM:SS or HH:MM:SS string into seconds."""

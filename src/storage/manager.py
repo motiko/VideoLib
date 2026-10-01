@@ -1,5 +1,4 @@
 import asyncio
-import os
 import uuid
 from pathlib import Path
 from src.config import config
@@ -7,7 +6,7 @@ from src.utils.logger import logger
 
 class StorageManager:
     """Manages temporary storage for downloaded media, including directory setup and safe cleanup."""
-    
+
     def __init__(self, download_dir: Path):
         self.download_dir = download_dir
 
@@ -25,7 +24,7 @@ class StorageManager:
         # Ensure suffix has a leading dot
         if suffix and not suffix.startswith("."):
             suffix = f".{suffix}"
-        
+
         filename = f"{uuid.uuid4().hex}{suffix}"
         return self.download_dir / filename
 
@@ -33,9 +32,9 @@ class StorageManager:
         """Asynchronously and safely removes a file if it exists, unless KEEP_TMP_FILES is enabled."""
         if not path:
             return False
-            
+
         file_path = Path(path).resolve()
-        
+
         # Security sanity check: Ensure path lies inside the configured download directory
         # to prevent directory traversal deletions.
         try:
@@ -66,7 +65,7 @@ class StorageManager:
                 return True
         except Exception as e:
             logger.error(f"StorageManager: Failed to delete file {file_path}: {e}")
-            
+
         return False
 
 # Global instance of storage manager
