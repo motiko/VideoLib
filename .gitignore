@@ -1,0 +1,10 @@
+# Load environment variables from .env
+.env
+.pyc
+tmp/
+.pip-log.txt
+.DS_Store
+__pycache__/
+*.log
+.pytest_cache/
+telegram-api-data/

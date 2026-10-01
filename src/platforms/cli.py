@@ -1,0 +1,28 @@
+from pathlib import Path
+from src.platforms.base import BasePlatform
+from src.utils.logger import logger
+
+class CliPlatform(BasePlatform):
+    """Platform adapter for command-line interface execution."""
+    
+    def __init__(self):
+        super().__init__("cli")
+
+    async def start(self) -> None:
+        logger.info("CliPlatform: Started CLI platform interface.")
+
+    async def stop(self) -> None:
+        logger.info("CliPlatform: Stopped CLI platform interface.")
+
+    async def send_message(self, chat_id: str, text: str) -> None:
+        """Outputs text status messages directly to the terminal stdout."""
+        print(f"\n💬 [CLI Status] {text}")
+
+    async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None) -> None:
+        """Reports video completion and output file location directly to the terminal."""
+        size_mb = file_path.stat().st_size / (1024 * 1024) if file_path.exists() else 0.0
+        print(f"\n🎉 [CLI Deliverable] Video successfully created!")
+        print(f"   - File Path: {file_path}")
+        print(f"   - File Size: {size_mb:.2f} MB")
+        if caption:
+            print(f"   - Details:   {caption}")
