@@ -110,8 +110,26 @@ class TelegramPlatform(BasePlatform):
             return
 
         text = update.message.text.strip()
-        chat_id = str(update.effective_chat.id)
+        chat = update.effective_chat
+        chat_id = str(chat.id)
         
+        from telegram.constants import ChatType
+        
+        if chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+            bot_username = context.bot.username
+            if not bot_username:
+                return # Can't check mention if username is unknown
+                
+            mention = f"@{bot_username}"
+            
+            # Use case-insensitive check since Telegram usernames are case-insensitive
+            pattern = re.compile(re.escape(mention), re.IGNORECASE)
+            if not pattern.search(text):
+                return # Ignore messages that don't mention the bot
+                
+            # Treat the rest of the message as DM by removing the mention
+            text = pattern.sub("", text).strip()
+
         match = self._url_pattern.search(text)
         if not match:
             # Inform user if they didn't send a link
