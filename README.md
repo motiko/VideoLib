@@ -100,28 +100,39 @@ videolib/
 
 ### Installation
 
+#### Option A: Homebrew (Recommended for macOS)
+
+```bash
+brew tap motiko/videolib
+brew install videolib
+```
+
+#### Option B: From Source
+
 1. Clone the repository:
    ```bash
-   git clone https://github.com/username/videolib.git
-   cd videolib
+   git clone https://github.com/motiko/VideoLib.git
+   cd VideoLib
    ```
 
-2. Create a virtual environment and activate it:
+2. Create a virtual environment and install:
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
-   ```
-
-3. Install requirements:
-   ```bash
-   pip install -r requirements.txt
+   pip install -e ".[dev]"
    ```
 
 ### Configuration
 
-Copy `.env.example` to `.env` and fill in the required tokens and command structures:
 ```bash
+# For Homebrew installs:
+mkdir -p ~/.config/videolib
+cp $(brew --prefix videolib)/.env.example ~/.config/videolib/.env
+vim ~/.config/videolib/.env
+
+# For source installs:
 cp .env.example .env
+vim .env
 ```
 
 #### Environment Variables
@@ -130,7 +141,7 @@ cp .env.example .env
 | :--- | :--- | :--- |
 | `TELEGRAM_BOT_TOKEN` | Bot token from [@BotFather](https://t.me/BotFather) | (Required) |
 | `TELEGRAM_API_URL` | Optional custom Local Bot API server URL | `https://api.telegram.org` |
-| `DOWNLOAD_DIR` | Relative path where temporary files are stored | `./tmp` |
+| `DOWNLOAD_DIR` | Path where temporary files are stored | `./tmp` |
 | `DOWNLOAD_COMMAND` | Shell command template. Use `{url}` and `{output_path}` as placeholders. | `yt-dlp -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 -o "{output_path}" "{url}"` |
 | `MAX_CONCURRENT_DOWNLOADS` | Max number of videos downloading at the same time | `3` |
 | `MAX_FILE_SIZE_MB` | Maximum size in MB to download and send | `50` |
@@ -156,9 +167,73 @@ After starting the container, update your `.env` file to point to the local inst
 
 ### Running the Bot
 
-Run the entrypoint to start the bot:
 ```bash
+# Foreground (source install)
 python run.py
+# or
+videolib
+
+# Single URL download
+videolib --url https://example.com/video
+
+# Interactive CLI mode
+videolib --cli
+```
+
+---
+
+## 🖥️ macOS Background Service
+
+VideoLib can run as a persistent background service via macOS `launchd`, with automatic restart on crashes.
+
+### Quick Start (Homebrew)
+
+```bash
+brew services start videolib    # Start & enable auto-start on login
+brew services stop videolib     # Stop the service
+brew services restart videolib  # Restart after config changes
+brew services info videolib     # View service status
+```
+
+### Quick Start (Manual)
+
+```bash
+# Install the launchd plist
+./scripts/install-service.sh
+
+# Or specify a custom binary path
+./scripts/install-service.sh /path/to/videolib
+```
+
+### Service Behavior
+
+| Feature | Detail |
+|---|---|
+| **Auto-start on login** | `RunAtLoad = true` |
+| **Auto-restart on crash** | `KeepAlive.SuccessfulExit = false` |
+| **Throttle rapid crashes** | Waits 10 seconds before restarting |
+| **Logs** | `~/Library/Logs/VideoLib/` |
+| **Config** | `~/.config/videolib/.env` |
+
+### Service Management
+
+```bash
+# Check service status
+videolib --status
+
+# View live logs
+tail -f ~/Library/Logs/VideoLib/videolib.stdout.log
+
+# Uninstall the service
+./scripts/uninstall-service.sh
+```
+
+### Updating
+
+```bash
+# Homebrew
+brew update && brew upgrade videolib
+brew services restart videolib
 ```
 
 ---

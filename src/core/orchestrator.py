@@ -44,7 +44,7 @@ class Orchestrator:
         # Safe URL check beforehand
         if not shell_runner.validate_url(url):
             await platform.send_message(
-                chat_id, 
+                chat_id,
                 "❌ Error: Invalid or unsafe URL. Make sure it starts with http:// or https:// and contains no illegal characters.",
                 reply_to_message_id=message_id
             )
@@ -55,7 +55,7 @@ class Orchestrator:
 
         file_path: Path | None = None
         status_msg_id: str | None = None
-        
+
         try:
             # Let the user know the bot is waiting for a slot in the concurrency queue if locked
             if self.semaphore.locked():
@@ -108,7 +108,7 @@ class Orchestrator:
 
                 # Generate a secure temporary path
                 file_path = storage_manager.generate_path(suffix=".mp4")
-                
+
                 # Run the download command
                 downloaded_file = await shell_runner.download(
                     url,
@@ -118,7 +118,7 @@ class Orchestrator:
 
                 # 3. Download finished, starting upload: Rocket reaction
                 await platform.react_to_message(chat_id, message_id, "🚀")
-                
+
                 # Deliver the file with background estimated upload ticker
                 file_size_bytes = downloaded_file.stat().st_size if downloaded_file.exists() else 0
                 upload_start = time.monotonic()
@@ -170,7 +170,7 @@ class Orchestrator:
                         format_progress_bar("📤 Uploading to chat", final_prog, title=tracker.title, url=tracker.url),
                         force=True
                     )
-                
+
         except DownloadError as de:
             logger.warning(f"Orchestrator: Download failed for {url} in chat {chat_id}: {de}")
             if status_msg_id:
