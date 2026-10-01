@@ -20,7 +20,7 @@ class Orchestrator:
         platform.register_callback(self.handle_request)
         logger.info(f"Orchestrator: Registered platform adapter '{platform.name}'")
 
-    async def handle_request(self, platform_name: str, chat_id: str, url: str) -> None:
+    async def handle_request(self, platform_name: str, chat_id: str, message_id: str, url: str) -> None:
         """Callback invoked by platform adapters when a download request is received."""
         platform = self.platforms.get(platform_name)
         if not platform:
@@ -31,19 +31,24 @@ class Orchestrator:
         if not shell_runner.validate_url(url):
             await platform.send_message(
                 chat_id, 
-                "❌ Error: Invalid or unsafe URL. Make sure it starts with http:// or https:// and contains no illegal characters."
+                "❌ Error: Invalid or unsafe URL. Make sure it starts with http:// or https:// and contains no illegal characters.",
+                reply_to_message_id=message_id
             )
             return
 
         file_path: Path | None = None
+        status_msg_id: str | None = None
         
         try:
             # Let the user know the bot is waiting for a slot in the concurrency queue
             if self.semaphore.locked():
-                await platform.send_message(chat_id, "⏳ System busy. Your request is queued...")
+                status_msg_id = await platform.send_message(chat_id, "⏳ System busy. Your request is queued...", reply_to_message_id=message_id)
 
             async with self.semaphore:
-                await platform.send_message(chat_id, "📥 Downloading video... Please wait.")
+                if status_msg_id:
+                    await platform.edit_message(chat_id, status_msg_id, "📥 Downloading video... Please wait.")
+                else:
+                    status_msg_id = await platform.send_message(chat_id, "📥 Downloading video... Please wait.", reply_to_message_id=message_id)
                 
                 # Generate a secure temporary path
                 file_path = storage_manager.generate_path(suffix=".mp4")
@@ -51,21 +56,32 @@ class Orchestrator:
                 # Run the download command
                 downloaded_file = await shell_runner.download(url, file_path)
                 
-                await platform.send_message(chat_id, "📤 Download complete. Uploading video to chat...")
+                if status_msg_id:
+                    await platform.edit_message(chat_id, status_msg_id, "📤 Download complete. Uploading video to chat...")
                 
                 # Deliver the file
                 await platform.send_video(
                     chat_id=chat_id, 
                     file_path=downloaded_file, 
-                    caption=f"Here is your video!\nURL: {url}"
+                    caption="Here is your video!",
+                    reply_to_message_id=message_id
                 )
+                
+                # We can delete the status message after sending the video to clean up
+                # Or leave it as is.
                 
         except DownloadError as de:
             logger.warning(f"Orchestrator: Download failed for {url} in chat {chat_id}: {de}")
-            await platform.send_message(chat_id, f"❌ Download error: {str(de)}")
+            if status_msg_id:
+                await platform.edit_message(chat_id, status_msg_id, f"❌ Download error: {str(de)}")
+            else:
+                await platform.send_message(chat_id, f"❌ Download error: {str(de)}", reply_to_message_id=message_id)
         except Exception as e:
             logger.exception(f"Orchestrator: Unexpected exception occurred handling URL {url} in chat {chat_id}: {e}")
-            await platform.send_message(chat_id, "❌ An unexpected error occurred while processing your request.")
+            if status_msg_id:
+                await platform.edit_message(chat_id, status_msg_id, "❌ An unexpected error occurred while processing your request.")
+            else:
+                await platform.send_message(chat_id, "❌ An unexpected error occurred while processing your request.", reply_to_message_id=message_id)
         finally:
             # Guarantee cleanup of files to prevent filling up the disk
             if file_path:

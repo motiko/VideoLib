@@ -3,7 +3,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables from .env file if it exists
-load_dotenv()
+# override=True ensures changes to .env overwrite system environment variables
+load_dotenv(override=True)
 
 def _parse_bool(val: str | None, default: bool = False) -> bool:
     if not val:
@@ -28,7 +29,7 @@ class Config:
     # Command template for running the downloader
     DOWNLOAD_COMMAND: str = os.getenv(
         "DOWNLOAD_COMMAND",
-        'yt-dlp -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 -o "{output_path}" "{url}"'
+        'yt-dlp --sponsorblock-remove default -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 -o "{output_path}" "{url}"'
     )
     
     # Constraints

@@ -44,7 +44,7 @@ async def main() -> None:
 
         if args.url:
             logger.info(f"Processing CLI URL: {args.url}")
-            await orchestrator.handle_request("cli", "cli_user", args.url)
+            await orchestrator.handle_request("cli", "cli_user", "cli_msg", args.url)
 
         if args.cli:
             print("\n" + "=" * 60)
@@ -63,7 +63,7 @@ async def main() -> None:
                     break
 
                 if user_input:
-                    await orchestrator.handle_request("cli", "cli_user", user_input)
+                    await orchestrator.handle_request("cli", "cli_user", "cli_msg", user_input)
 
         await cli_platform.stop()
         return

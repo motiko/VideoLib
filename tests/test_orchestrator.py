@@ -10,14 +10,22 @@ class MockPlatform(BasePlatform):
     def __init__(self, name):
         super().__init__(name)
         self.sent_messages = []
+        self.edited_messages = []
         self.sent_videos = []
+        self._msg_id_counter = 0
 
     async def start(self) -> None: pass
     async def stop(self) -> None: pass
-    async def send_message(self, chat_id: str, text: str) -> None:
-        self.sent_messages.append((chat_id, text))
-    async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None) -> None:
-        self.sent_videos.append((chat_id, file_path, caption))
+    async def send_message(self, chat_id: str, text: str, reply_to_message_id: str | None = None) -> str | None:
+        self.sent_messages.append((chat_id, text, reply_to_message_id))
+        self._msg_id_counter += 1
+        return str(self._msg_id_counter)
+        
+    async def edit_message(self, chat_id: str, message_id: str, text: str) -> None:
+        self.edited_messages.append((chat_id, message_id, text))
+
+    async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None, reply_to_message_id: str | None = None) -> None:
+        self.sent_videos.append((chat_id, file_path, caption, reply_to_message_id))
 
 @pytest.fixture
 def orchestrator():
@@ -44,7 +52,7 @@ async def test_orchestrator_success(mock_storage, mock_runner, orchestrator, moc
     mock_storage.cleanup = AsyncMock(return_value=True)
     
     url = "https://youtube.com/watch?v=123"
-    await orchestrator.handle_request("mock_platform", "12345", url)
+    await orchestrator.handle_request("mock_platform", "12345", "101", url)
     
     # Assert download was called
     mock_runner.download.assert_called_once_with(url, temp_path)
@@ -53,7 +61,8 @@ async def test_orchestrator_success(mock_storage, mock_runner, orchestrator, moc
     assert len(mock_platform.sent_videos) == 1
     assert mock_platform.sent_videos[0][0] == "12345"
     assert mock_platform.sent_videos[0][1] == temp_path
-    assert url in mock_platform.sent_videos[0][2]
+    assert "Here is your video!" in mock_platform.sent_videos[0][2]
+    assert mock_platform.sent_videos[0][3] == "101"
     
     # Assert cleanup was called
     mock_storage.cleanup.assert_called_once_with(temp_path)
@@ -72,10 +81,10 @@ async def test_orchestrator_download_error(mock_storage, mock_runner, orchestrat
     mock_storage.cleanup = AsyncMock(return_value=True)
     
     url = "https://youtube.com/watch?v=123"
-    await orchestrator.handle_request("mock_platform", "12345", url)
+    await orchestrator.handle_request("mock_platform", "12345", "101", url)
     
     # Verify error message sent
-    assert any("Download error: File too large" in msg[1] for msg in mock_platform.sent_messages)
+    assert any("Download error: File too large" in msg[2] for msg in mock_platform.edited_messages)
     
     # Verify cleanup still ran
     mock_storage.cleanup.assert_called_once_with(temp_path)
@@ -90,7 +99,7 @@ async def test_orchestrator_invalid_url(mock_storage, mock_runner, orchestrator,
     mock_runner.download = AsyncMock()
     mock_storage.cleanup = AsyncMock()
     
-    await orchestrator.handle_request("mock_platform", "12345", "ftp://unsafe-link")
+    await orchestrator.handle_request("mock_platform", "12345", "101", "ftp://unsafe-link")
     
     mock_runner.download.assert_not_called()
     mock_storage.generate_path.assert_not_called()

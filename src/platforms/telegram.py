@@ -51,16 +51,30 @@ class TelegramPlatform(BasePlatform):
             await self.application.shutdown()
             logger.info("TelegramPlatform: Stopped successfully.")
 
-    async def send_message(self, chat_id: str, text: str) -> None:
+    async def send_message(self, chat_id: str, text: str, reply_to_message_id: str | None = None) -> str | None:
         """Sends a text message back to the Telegram chat."""
         if not self.application:
             raise RuntimeError("Telegram application is not running.")
         try:
-            await self.application.bot.send_message(chat_id=chat_id, text=text)
+            kwargs = {"chat_id": chat_id, "text": text}
+            if reply_to_message_id:
+                kwargs["reply_to_message_id"] = int(reply_to_message_id)
+            msg = await self.application.bot.send_message(**kwargs)
+            return str(msg.message_id)
         except Exception as e:
             logger.error(f"TelegramPlatform: Failed to send message to {chat_id}: {e}")
+            return None
 
-    async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None) -> None:
+    async def edit_message(self, chat_id: str, message_id: str, text: str) -> None:
+        """Edits an existing message in the Telegram chat."""
+        if not self.application:
+            raise RuntimeError("Telegram application is not running.")
+        try:
+            await self.application.bot.edit_message_text(chat_id=chat_id, message_id=int(message_id), text=text)
+        except Exception as e:
+            logger.error(f"TelegramPlatform: Failed to edit message {message_id} in {chat_id}: {e}")
+
+    async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None, reply_to_message_id: str | None = None) -> None:
         """Uploads and sends a video file to the Telegram chat."""
         if not self.application:
             raise RuntimeError("Telegram application is not running.")
@@ -68,15 +82,19 @@ class TelegramPlatform(BasePlatform):
         # Open the file in binary read mode
         # python-telegram-bot/httpx handles async chunks internally
         try:
+            kwargs = {
+                "chat_id": chat_id,
+                "caption": caption,
+                "read_timeout": 180.0,
+                "write_timeout": 180.0,
+                "connect_timeout": 60.0
+            }
+            if reply_to_message_id:
+                kwargs["reply_to_message_id"] = int(reply_to_message_id)
+                
             with open(file_path, "rb") as video_file:
-                await self.application.bot.send_video(
-                    chat_id=chat_id,
-                    video=video_file,
-                    caption=caption,
-                    read_timeout=180.0,
-                    write_timeout=180.0,
-                    connect_timeout=60.0
-                )
+                kwargs["video"] = video_file
+                await self.application.bot.send_video(**kwargs)
             logger.info(f"TelegramPlatform: Successfully sent video {file_path} to {chat_id}")
         except Exception as e:
             logger.error(f"TelegramPlatform: Failed to send video {file_path} to {chat_id}: {e}")
@@ -142,10 +160,12 @@ class TelegramPlatform(BasePlatform):
         url = match.group(1).replace("\\", "")
         logger.info(f"TelegramPlatform: Found URL {url} from chat {chat_id}")
         
+        message_id = str(update.message.message_id)
+
         if self.message_callback:
             # Delegate handling to orchestrator asynchronously
             # We schedule it as a separate background task so we don't block the platform's event listener thread
-            asyncio.create_task(self.message_callback("telegram", chat_id, url))
+            asyncio.create_task(self.message_callback("telegram", chat_id, message_id, url))
         else:
             logger.warning("TelegramPlatform: Message received, but no callback registered.")
 

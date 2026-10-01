@@ -3,8 +3,8 @@ from pathlib import Path
 from typing import Callable, Coroutine, Any
 
 # Type alias for message handler callbacks
-# Callback receives: (platform_name, chat_id, url)
-MessageCallback = Callable[[str, str, str], Coroutine[Any, Any, None]]
+# Callback receives: (platform_name, chat_id, message_id, url)
+MessageCallback = Callable[[str, str, str, str], Coroutine[Any, Any, None]]
 
 class BasePlatform(ABC):
     """Abstract base class that all platform bot adapters (Telegram) must implement."""
@@ -28,11 +28,17 @@ class BasePlatform(ABC):
         pass
 
     @abstractmethod
-    async def send_message(self, chat_id: str, text: str) -> None:
-        """Sends a text message to a specific chat/user."""
+    async def send_message(self, chat_id: str, text: str, reply_to_message_id: str | None = None) -> str | None:
+        """Sends a text message to a specific chat/user. Returns message ID if supported."""
         pass
 
     @abstractmethod
-    async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None) -> None:
+    async def edit_message(self, chat_id: str, message_id: str, text: str) -> None:
+        """Edits an existing message in a specific chat."""
+        pass
+
+    @abstractmethod
+    async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None, reply_to_message_id: str | None = None) -> None:
         """Sends a video file to a specific chat/user."""
         pass
+
