@@ -1,5 +1,4 @@
 """Tests for the error classification and formatting module."""
-import pytest
 from src.core.errors import (
     classify_download_error,
     classify_upload_error,
