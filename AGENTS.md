@@ -90,3 +90,10 @@ When tasked with implementing a feature (e.g., "Add a new feature"):
 3. Hook into the orchestrator inside `src/core/orchestrator.py` without modifying the core download logic.
 4. Run `ruff check .` (or equivalent linter) to verify style.
 5. Create a corresponding test file under `tests/` and run `pytest`.
+
+---
+
+## 🌿 Git & Deployment Rules
+
+* **Never commit or push to `main` automatically**: Only run `git commit` or `git push` on `main` when explicitly requested by the user. Do not proactively commit or push code changes to `main` as part of autonomous task completion.
+
