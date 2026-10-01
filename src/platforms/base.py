@@ -3,8 +3,8 @@ from pathlib import Path
 from typing import Callable, Coroutine, Any
 
 # Type alias for message handler callbacks
-# Callback receives: (platform_name, chat_id, message_id, url)
-MessageCallback = Callable[[str, str, str, str], Coroutine[Any, Any, None]]
+# Callback receives: (platform_name, chat_id, message_id, url, user_id=...)
+MessageCallback = Callable[..., Coroutine[Any, Any, None]]
 
 class BasePlatform(ABC):
     """Abstract base class that all platform bot adapters (Telegram) must implement."""

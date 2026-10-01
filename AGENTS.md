@@ -96,4 +96,5 @@ When tasked with implementing a feature (e.g., "Add a new feature"):
 ## 🌿 Git & Deployment Rules
 
 * **Never commit or push to `main` automatically**: Only run `git commit` or `git push` on `main` when explicitly requested by the user. Do not proactively commit or push code changes to `main` as part of autonomous task completion.
+* **Never force push publicly pushed commits**: Do not rewrite history or force-push (`git push --force` / `--force-with-lease`) on branches that have already been pushed to the remote repository. Always create revert commits (`git revert`) instead.
 
