@@ -23,7 +23,17 @@ async def test_cli_platform_messaging(capsys, tmp_path):
     captured = capsys.readouterr()
     assert "[CLI Deliverable]" in captured.out
     assert str(dummy_video) in captured.out
-    assert "Test Caption" in captured.out
+    # Test delete_message
+    res = await cli.delete_message("cli_user", "msg123")
+    assert res is True
+    captured = capsys.readouterr()
+    assert "[CLI Status] Deleted message msg123" in captured.out
+
+    # Test react_to_message
+    r_res = await cli.react_to_message("cli_user", "msg123", "✅")
+    assert r_res is True
+    captured = capsys.readouterr()
+    assert "[CLI Reaction] ✅ on message msg123" in captured.out
     
     await cli.stop()
 

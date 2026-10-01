@@ -167,4 +167,32 @@ async def test_real_subprocess_streaming(tmp_path):
     assert 10.0 in received_progress
     assert 50.0 in received_progress
 
+@pytest.mark.asyncio
+@patch("asyncio.create_subprocess_exec")
+async def test_extract_title_success(mock_create_subprocess):
+    """Verify that extract_title returns the parsed title from subprocess stdout."""
+    runner = ShellRunner('yt-dlp --cookies-from-browser chrome -o "{output_path}" "{url}"', 50)
+    mock_proc = AsyncMock()
+    mock_proc.communicate.return_value = (b"Sample Video Title\n", b"")
+    mock_proc.returncode = 0
+    mock_create_subprocess.return_value = mock_proc
+
+    title = await runner.extract_title("https://youtube.com/watch?v=123")
+    assert title == "Sample Video Title"
+    mock_create_subprocess.assert_called_once()
+    args, kwargs = mock_create_subprocess.call_args
+    assert "yt-dlp" in args[0]
+    assert "--print" in args
+    assert "%(title)s" in args
+    assert "--cookies-from-browser" in args
+    assert "chrome" in args
+
+@pytest.mark.asyncio
+async def test_extract_title_invalid_url():
+    """Verify extract_title returns None for invalid or unsafe URLs without executing subprocess."""
+    runner = ShellRunner('yt-dlp -o "{output_path}" "{url}"', 50)
+    assert await runner.extract_title("invalid-url") is None
+    assert await runner.extract_title("https://example.com; rm -rf /") is None
+
+
 

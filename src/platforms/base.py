@@ -38,6 +38,16 @@ class BasePlatform(ABC):
         pass
 
     @abstractmethod
+    async def delete_message(self, chat_id: str, message_id: str) -> bool:
+        """Deletes a message in a specific chat. Returns True if successful."""
+        pass
+
+    @abstractmethod
+    async def react_to_message(self, chat_id: str, message_id: str, emoji: str = "✅") -> bool:
+        """Reacts to a message with an emoji."""
+        pass
+
+    @abstractmethod
     async def send_video(
         self,
         chat_id: str,

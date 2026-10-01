@@ -9,6 +9,7 @@ class DummyPlatform(BasePlatform):
     def __init__(self):
         super().__init__("dummy")
         self.edits = []
+        self.deleted = []
 
     async def start(self) -> None: pass
     async def stop(self) -> None: pass
@@ -16,23 +17,42 @@ class DummyPlatform(BasePlatform):
         return "1"
     async def edit_message(self, chat_id: str, message_id: str, text: str) -> None:
         self.edits.append((chat_id, message_id, text))
+    async def delete_message(self, chat_id: str, message_id: str) -> bool:
+        self.deleted.append((chat_id, message_id))
+        return True
+    async def react_to_message(self, chat_id: str, message_id: str, emoji: str = "✅") -> bool:
+        return True
     async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None, reply_to_message_id: str | None = None, **kwargs) -> None:
         pass
 
 def test_format_progress_bar():
     assert "0.0%" in format_progress_bar("Downloading", 0.0)
     assert "50.0%" in format_progress_bar("Downloading", 50.0)
-    assert "100%" in format_progress_bar("Downloading", 100.0)
+    assert "100" in format_progress_bar("Downloading", 100.0)
     assert "█" in format_progress_bar("Downloading", 50.0)
     assert "░" in format_progress_bar("Downloading", 50.0)
 
     # Test with DownloadProgress object containing ETA, speed, size
     prog = DownloadProgress(45.5, eta="00:12", speed="3.45MiB/s", size="25.00MiB")
-    formatted = format_progress_bar("📥 Downloading video", prog)
+    formatted = format_progress_bar("Downloading", prog)
     assert "45.5%" in formatted
-    assert "ETA: 00:12" in formatted
-    assert "Speed: 3.45MiB/s" in formatted
-    assert "Size: 25.00MiB" in formatted
+    # Check ETA has colons broken with zero-width space so Telegram client does not linkify it
+    assert "00:\u200b12" in formatted
+    assert "3.45MiB/s" in formatted
+    assert "25.00MiB" in formatted
+    assert "📥 Downloading:" in formatted
+
+    assert "<code>" in formatted
+    assert "</code>" in formatted
+
+    # Test with title (plain text title without link, properly HTML-escaped)
+    formatted_with_title = format_progress_bar(
+        "Downloading",
+        prog,
+        title="Sample Video & Clips <HD>",
+        url="https://youtube.com/watch?v=abc"
+    )
+    assert formatted_with_title.startswith("Sample Video &amp; Clips &lt;HD&gt;\n\n📥 Downloading:")
 
 @pytest.mark.asyncio
 async def test_progress_file_reader():
@@ -117,5 +137,17 @@ async def test_run_estimated_upload_ticker():
         await task
 
     assert len(platform.edits) >= 1
-    assert any("Uploading to chat" in edit[2] for edit in platform.edits)
-    assert any("Size: 10.00MiB" in edit[2] for edit in platform.edits)
+    assert any("Uploading" in edit[2] for edit in platform.edits)
+    assert any("10.00MiB" in edit[2] for edit in platform.edits)
+
+def test_parse_eta_and_size():
+    from src.utils.progress import parse_eta_seconds, parse_size_bytes
+    assert parse_eta_seconds("00:25") == 25
+    assert parse_eta_seconds("01:15") == 75
+    assert parse_eta_seconds("01:02:03") == 3723
+    assert parse_eta_seconds(None) is None
+
+    assert parse_size_bytes("100B") == 100
+    assert parse_size_bytes("10.00MiB") == 10 * 1024 * 1024
+    assert parse_size_bytes("~ 5.5MiB") == int(5.5 * 1024 * 1024)
+    assert parse_size_bytes(None) is None

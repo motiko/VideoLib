@@ -67,6 +67,51 @@ class ShellRunner:
         except Exception:
             return False
 
+    async def extract_title(self, url: str, timeout_seconds: float = 20.0) -> str | None:
+        """Safely queries video title using yt-dlp metadata extraction."""
+        url = url.replace("\\", "")
+        if not self.validate_url(url):
+            return None
+
+        raw_tokens = shlex.split(self.command_template)
+        binary = raw_tokens[0] if raw_tokens else "yt-dlp"
+
+        args = [binary, "--print", "%(title)s", "--no-warnings", "--no-playlist"]
+
+        # Preserve cookie or proxy or user-agent flags from command template if present
+        i = 1
+        while i < len(raw_tokens):
+            tok = raw_tokens[i]
+            if tok in ("--cookies", "--cookies-from-browser", "--proxy", "--user-agent"):
+                args.append(tok)
+                if i + 1 < len(raw_tokens) and not raw_tokens[i + 1].startswith("-"):
+                    i += 1
+                    args.append(raw_tokens[i])
+            elif any(tok.startswith(prefix) for prefix in ("--cookies=", "--cookies-from-browser=", "--proxy=", "--user-agent=")):
+                args.append(tok)
+            i += 1
+
+        args.append(url)
+
+        env = os.environ.copy()
+        env["PYTHONWARNINGS"] = "ignore"
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+            if process.returncode == 0:
+                title = stdout.decode(errors="replace").strip()
+                if title:
+                    return title.splitlines()[0].strip()
+        except Exception as e:
+            logger.debug(f"ShellRunner: Failed to extract title for {url}: {e}")
+        return None
+
     def build_command_args(self, url: str, output_path: Path) -> list[str]:
         """Tokenizes the command template and safely interpolates url and output path."""
         # Use shlex to safely split the template into arguments list

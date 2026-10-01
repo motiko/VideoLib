@@ -23,6 +23,16 @@ class CliPlatform(BasePlatform):
         """Outputs text status messages directly to the terminal stdout."""
         print(f"\n💬 [CLI Status Update] {text}")
 
+    async def delete_message(self, chat_id: str, message_id: str) -> bool:
+        """Simulates deleting a message in CLI platform."""
+        print(f"\n🗑️ [CLI Status] Deleted message {message_id}")
+        return True
+
+    async def react_to_message(self, chat_id: str, message_id: str, emoji: str = "✅") -> bool:
+        """Simulates reacting to a message with an emoji."""
+        print(f"\n✨ [CLI Reaction] {emoji} on message {message_id}")
+        return True
+
     async def send_video(
         self,
         chat_id: str,

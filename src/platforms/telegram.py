@@ -2,7 +2,7 @@ import asyncio
 import re
 from typing import Callable, Coroutine, Any
 from pathlib import Path
-from telegram import Update, InputFile
+from telegram import Update, InputFile, LinkPreviewOptions
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from src.platforms.base import BasePlatform
 from src.utils.logger import logger
@@ -54,25 +54,47 @@ class TelegramPlatform(BasePlatform):
             logger.info("TelegramPlatform: Stopped successfully.")
 
     async def send_message(self, chat_id: str, text: str, reply_to_message_id: str | None = None) -> str | None:
-        """Sends a text message back to the Telegram chat."""
+        """Sends a text message back to the Telegram chat without link preview."""
         if not self.application:
             raise RuntimeError("Telegram application is not running.")
+        kwargs = {
+            "chat_id": chat_id,
+            "text": text,
+            "link_preview_options": LinkPreviewOptions(is_disabled=True),
+        }
+        if "<pre>" in text or "<code>" in text:
+            kwargs["parse_mode"] = "HTML"
+        if reply_to_message_id:
+            kwargs["reply_to_message_id"] = int(reply_to_message_id)
         try:
-            kwargs = {"chat_id": chat_id, "text": text}
-            if reply_to_message_id:
-                kwargs["reply_to_message_id"] = int(reply_to_message_id)
             msg = await self.application.bot.send_message(**kwargs)
             return str(msg.message_id)
         except Exception as e:
+            if "parse" in str(e).lower() and kwargs.get("parse_mode") == "HTML":
+                try:
+                    kwargs.pop("parse_mode", None)
+                    kwargs["text"] = text.replace("<code>", "").replace("</code>", "").replace("<pre>", "").replace("</pre>", "")
+                    msg = await self.application.bot.send_message(**kwargs)
+                    return str(msg.message_id)
+                except Exception as e2:
+                    logger.error(f"TelegramPlatform: Fallback send message failed: {e2}")
             logger.error(f"TelegramPlatform: Failed to send message to {chat_id}: {e}")
             return None
 
     async def edit_message(self, chat_id: str, message_id: str, text: str) -> None:
-        """Edits an existing message in the Telegram chat."""
+        """Edits an existing message in the Telegram chat without link preview."""
         if not self.application:
             raise RuntimeError("Telegram application is not running.")
+        kwargs = {
+            "chat_id": chat_id,
+            "message_id": int(message_id),
+            "text": text,
+            "link_preview_options": LinkPreviewOptions(is_disabled=True),
+        }
+        if "<pre>" in text or "<code>" in text:
+            kwargs["parse_mode"] = "HTML"
         try:
-            await self.application.bot.edit_message_text(chat_id=chat_id, message_id=int(message_id), text=text)
+            await self.application.bot.edit_message_text(**kwargs)
         except Exception as e:
             err_str = str(e).lower()
             if "not modified" in err_str:
@@ -80,7 +102,47 @@ class TelegramPlatform(BasePlatform):
             if "retry_after" in err_str or "flood" in err_str:
                 logger.warning(f"TelegramPlatform: Rate limited editing message {message_id} in {chat_id}: {e}")
                 return
+            if "parse" in err_str and kwargs.get("parse_mode") == "HTML":
+                try:
+                    kwargs.pop("parse_mode", None)
+                    kwargs["text"] = text.replace("<code>", "").replace("</code>", "").replace("<pre>", "").replace("</pre>", "")
+                    await self.application.bot.edit_message_text(**kwargs)
+                    return
+                except Exception as e2:
+                    logger.warning(f"TelegramPlatform: Fallback edit failed: {e2}")
             logger.error(f"TelegramPlatform: Failed to edit message {message_id} in {chat_id}: {e}")
+
+    async def delete_message(self, chat_id: str, message_id: str) -> bool:
+        """Deletes an existing message in the Telegram chat."""
+        if not self.application:
+            raise RuntimeError("Telegram application is not running.")
+        try:
+            return await self.application.bot.delete_message(chat_id=chat_id, message_id=int(message_id))
+        except Exception as e:
+            logger.warning(f"TelegramPlatform: Failed to delete message {message_id} in {chat_id}: {e}")
+            return False
+
+    async def react_to_message(self, chat_id: str, message_id: str, emoji: str = "✅") -> bool:
+        """Reacts to a message with an emoji."""
+        if not self.application:
+            raise RuntimeError("Telegram application is not running.")
+        try:
+            return await self.application.bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=int(message_id),
+                reaction=emoji
+            )
+        except Exception as e:
+            try:
+                # Fallback to standard thumbs-up if the custom emoji is not enabled in chat
+                return await self.application.bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=int(message_id),
+                    reaction="👍"
+                )
+            except Exception as e2:
+                logger.debug(f"TelegramPlatform: Could not set message reaction: {e2}")
+                return False
 
     async def send_video(
         self,
