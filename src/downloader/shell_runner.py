@@ -1,7 +1,9 @@
 import asyncio
 import os
+import re
 import shlex
 import urllib.parse
+from typing import Callable, Coroutine, Any
 from pathlib import Path
 from src.config import config
 from src.utils.logger import logger, save_failure_log
@@ -60,7 +62,92 @@ class ShellRunner:
             
         return interpolated_tokens
 
-    async def download(self, url: str, output_path: Path, timeout_seconds: float = 300.0) -> Path:
+    async def _stream_process(
+        self,
+        process: asyncio.subprocess.Process,
+        timeout_seconds: float,
+        progress_callback: Callable[[float], Coroutine[Any, Any, None]] | Callable[[float], None] | None = None
+    ) -> tuple[str, str]:
+        """Streams process output in real-time and calls progress_callback when download percentage is detected."""
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+        progress_pattern = re.compile(r"\[download\]\s+([0-9.]+)%")
+
+        async def read_stdout() -> None:
+            if not process.stdout:
+                return
+            buffer = ""
+            while True:
+                chunk = await process.stdout.read(1024)
+                if not chunk:
+                    break
+                stdout_chunks.append(chunk)
+                buffer += chunk.decode(errors="replace")
+                while "\r" in buffer or "\n" in buffer:
+                    idx_r = buffer.find("\r")
+                    idx_n = buffer.find("\n")
+                    if idx_r != -1 and (idx_n == -1 or idx_r < idx_n):
+                        line = buffer[:idx_r]
+                        buffer = buffer[idx_r + 1:]
+                    else:
+                        line = buffer[:idx_n]
+                        buffer = buffer[idx_n + 1:]
+
+                    if progress_callback:
+                        m = progress_pattern.search(line)
+                        if m:
+                            try:
+                                pct = float(m.group(1))
+                                res = progress_callback(pct)
+                                if asyncio.iscoroutine(res):
+                                    await res
+                            except Exception:
+                                pass
+
+            if buffer and progress_callback:
+                m = progress_pattern.search(buffer)
+                if m:
+                    try:
+                        pct = float(m.group(1))
+                        res = progress_callback(pct)
+                        if asyncio.iscoroutine(res):
+                            await res
+                    except Exception:
+                        pass
+
+        async def read_stderr() -> None:
+            if not process.stderr:
+                return
+            while True:
+                chunk = await process.stderr.read(1024)
+                if not chunk:
+                    break
+                stderr_chunks.append(chunk)
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(read_stdout(), read_stderr(), process.wait()),
+                timeout=timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            try:
+                process.kill()
+                await process.wait()
+            except Exception:
+                pass
+            raise
+
+        stdout_str = b"".join(stdout_chunks).decode(errors="replace")
+        stderr_str = b"".join(stderr_chunks).decode(errors="replace")
+        return stdout_str, stderr_str
+
+    async def download(
+        self,
+        url: str,
+        output_path: Path,
+        timeout_seconds: float = 300.0,
+        progress_callback: Callable[[float], Coroutine[Any, Any, None]] | Callable[[float], None] | None = None
+    ) -> Path:
         """Runs the download command asynchronously. Returns the path of the downloaded file."""
         # Strip escaping backslashes
         url = url.replace("\\", "")
@@ -97,8 +184,24 @@ class ShellRunner:
             raise DownloadError(err_msg)
 
         try:
-            # Wait for execution with timeout
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+            if type(process) is asyncio.subprocess.Process:
+                stdout_str, stderr_str = await self._stream_process(process, timeout_seconds, progress_callback)
+            else:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+                stdout_str = stdout.decode(errors="replace")
+                stderr_str = stderr.decode(errors="replace")
+                if progress_callback:
+                    progress_pattern = re.compile(r"\[download\]\s+([0-9.]+)%")
+                    for line in stdout_str.replace("\r", "\n").splitlines():
+                        m = progress_pattern.search(line)
+                        if m:
+                            try:
+                                pct = float(m.group(1))
+                                res = progress_callback(pct)
+                                if asyncio.iscoroutine(res):
+                                    await res
+                            except Exception:
+                                pass
         except asyncio.TimeoutError:
             try:
                 process.kill()
@@ -110,8 +213,6 @@ class ShellRunner:
             save_failure_log(url, cmd_str, -1, "", timeout_msg)
             raise DownloadError(timeout_msg)
 
-        stdout_str = stdout.decode(errors="replace")
-        stderr_str = stderr.decode(errors="replace")
         exit_code = process.returncode
 
         if exit_code != 0:

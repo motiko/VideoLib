@@ -38,7 +38,14 @@ class BasePlatform(ABC):
         pass
 
     @abstractmethod
-    async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None, reply_to_message_id: str | None = None) -> None:
+    async def send_video(
+        self,
+        chat_id: str,
+        file_path: Path,
+        caption: str | None = None,
+        reply_to_message_id: str | None = None,
+        progress_callback: Callable[[float], Coroutine[Any, Any, None]] | Callable[[float], None] | None = None,
+    ) -> None:
         """Sends a video file to a specific chat/user."""
         pass
 

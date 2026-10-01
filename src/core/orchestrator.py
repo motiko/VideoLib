@@ -1,10 +1,12 @@
 import asyncio
+import inspect
 from pathlib import Path
 from src.config import config
 from src.downloader.shell_runner import shell_runner, DownloadError
 from src.storage.manager import storage_manager
 from src.platforms.base import BasePlatform
 from src.utils.logger import logger
+from src.utils.progress import MessageProgressTracker, format_progress_bar
 
 class Orchestrator:
     """Coordinates downloading tasks and routes messages between the platforms, downloader, and storage manager."""
@@ -45,30 +47,52 @@ class Orchestrator:
                 status_msg_id = await platform.send_message(chat_id, "⏳ System busy. Your request is queued...", reply_to_message_id=message_id)
 
             async with self.semaphore:
+                initial_status = format_progress_bar("📥 Downloading video", 0.0)
                 if status_msg_id:
-                    await platform.edit_message(chat_id, status_msg_id, "📥 Downloading video... Please wait.")
+                    await platform.edit_message(chat_id, status_msg_id, initial_status)
                 else:
-                    status_msg_id = await platform.send_message(chat_id, "📥 Downloading video... Please wait.", reply_to_message_id=message_id)
+                    status_msg_id = await platform.send_message(chat_id, initial_status, reply_to_message_id=message_id)
                 
+                tracker = MessageProgressTracker(platform, chat_id, status_msg_id)
+                tracker.last_text = initial_status
+
+                async def on_download_progress(percent: float) -> None:
+                    text = format_progress_bar("📥 Downloading video", percent)
+                    await tracker.update(text)
+
+                async def on_upload_progress(percent: float) -> None:
+                    text = format_progress_bar("📤 Uploading video", percent)
+                    await tracker.update(text)
+
                 # Generate a secure temporary path
                 file_path = storage_manager.generate_path(suffix=".mp4")
                 
                 # Run the download command
-                downloaded_file = await shell_runner.download(url, file_path)
-                
-                if status_msg_id:
-                    await platform.edit_message(chat_id, status_msg_id, "📤 Download complete. Uploading video to chat...")
-                
-                # Deliver the file
-                await platform.send_video(
-                    chat_id=chat_id, 
-                    file_path=downloaded_file, 
-                    caption="Here is your video!",
-                    reply_to_message_id=message_id
+                downloaded_file = await shell_runner.download(
+                    url,
+                    file_path,
+                    progress_callback=on_download_progress
                 )
                 
-                # We can delete the status message after sending the video to clean up
-                # Or leave it as is.
+                upload_start_status = format_progress_bar("📤 Uploading video", 0.0)
+                await tracker.update(upload_start_status, force=True)
+                
+                # Deliver the file
+                send_video_kwargs = {
+                    "chat_id": chat_id,
+                    "file_path": downloaded_file,
+                    "caption": "Here is your video!",
+                    "reply_to_message_id": message_id,
+                }
+                sig = inspect.signature(platform.send_video)
+                if "progress_callback" in sig.parameters or any(
+                    p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+                ):
+                    send_video_kwargs["progress_callback"] = on_upload_progress
+
+                await platform.send_video(**send_video_kwargs)
+                
+                await tracker.update("✅ Video sent!", force=True)
                 
         except DownloadError as de:
             logger.warning(f"Orchestrator: Download failed for {url} in chat {chat_id}: {de}")

@@ -23,7 +23,14 @@ class CliPlatform(BasePlatform):
         """Outputs text status messages directly to the terminal stdout."""
         print(f"\n💬 [CLI Status Update] {text}")
 
-    async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None, reply_to_message_id: str | None = None) -> None:
+    async def send_video(
+        self,
+        chat_id: str,
+        file_path: Path,
+        caption: str | None = None,
+        reply_to_message_id: str | None = None,
+        progress_callback: Any = None,
+    ) -> None:
         """Reports video completion and output file location directly to the terminal."""
         size_mb = file_path.stat().st_size / (1024 * 1024) if file_path.exists() else 0.0
         print(f"\n🎉 [CLI Deliverable] Video successfully created!")

@@ -107,3 +107,59 @@ async def test_download_timeout(mock_create_subprocess, tmp_path):
         
     assert "timed out" in str(exc_info.value)
     mock_proc.kill.assert_called_once()
+
+@pytest.mark.asyncio
+@patch("asyncio.create_subprocess_exec")
+async def test_download_with_progress_callback(mock_create_subprocess, tmp_path):
+    """Verify that progress_callback receives parsed percentage values from output."""
+    runner = ShellRunner('yt-dlp -o "{output_path}" "{url}"', 50)
+    dest_file = tmp_path / "video.mp4"
+    dest_file.write_text("fake video")
+
+    mock_proc = AsyncMock()
+    mock_proc.communicate.return_value = (
+        b"[download]  25.0% of ~ 10.00MiB at 2.00MiB/s\n[download]  75.5% of ~ 10.00MiB\n[download] 100% of 10.00MiB in 00:01\n",
+        b""
+    )
+    mock_proc.returncode = 0
+    mock_create_subprocess.return_value = mock_proc
+
+    received_progress = []
+    async def progress_cb(pct):
+        received_progress.append(pct)
+
+    await runner.download("https://youtube.com/watch?v=123", dest_file, progress_callback=progress_cb)
+
+    assert 25.0 in received_progress
+    assert 75.5 in received_progress
+    assert 100.0 in received_progress
+
+@pytest.mark.asyncio
+async def test_real_subprocess_streaming(tmp_path):
+    """Verify that real subprocess streaming reads progress and creates output file."""
+    import sys
+    dest_file = tmp_path / "video.mp4"
+    worker_script = (
+        "import sys, pathlib\n"
+        "sys.stdout.write('[download]  10.0% of 10M\\r')\n"
+        "sys.stdout.flush()\n"
+        "sys.stdout.write('[download]  50.0% of 10M\\n')\n"
+        "sys.stdout.flush()\n"
+        "pathlib.Path(sys.argv[1]).write_bytes(b'dummy')\n"
+    )
+    script_file = tmp_path / "worker.py"
+    script_file.write_text(worker_script)
+    cmd = f'{sys.executable} {script_file} "{{output_path}}"'
+    runner = ShellRunner(cmd, 50)
+
+    received_progress = []
+    async def progress_cb(pct):
+        received_progress.append(pct)
+
+    res = await runner.download("https://example.com/video", dest_file, progress_callback=progress_cb)
+    assert res == dest_file
+    assert dest_file.exists()
+    assert 10.0 in received_progress
+    assert 50.0 in received_progress
+
+

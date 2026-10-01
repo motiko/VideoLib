@@ -1,10 +1,12 @@
 import asyncio
 import re
+from typing import Callable, Coroutine, Any
 from pathlib import Path
-from telegram import Update
+from telegram import Update, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from src.platforms.base import BasePlatform
 from src.utils.logger import logger
+from src.utils.progress import ProgressFileReader
 from src.config import config
 
 class TelegramPlatform(BasePlatform):
@@ -72,9 +74,22 @@ class TelegramPlatform(BasePlatform):
         try:
             await self.application.bot.edit_message_text(chat_id=chat_id, message_id=int(message_id), text=text)
         except Exception as e:
+            err_str = str(e).lower()
+            if "not modified" in err_str:
+                return
+            if "retry_after" in err_str or "flood" in err_str:
+                logger.warning(f"TelegramPlatform: Rate limited editing message {message_id} in {chat_id}: {e}")
+                return
             logger.error(f"TelegramPlatform: Failed to edit message {message_id} in {chat_id}: {e}")
 
-    async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None, reply_to_message_id: str | None = None) -> None:
+    async def send_video(
+        self,
+        chat_id: str,
+        file_path: Path,
+        caption: str | None = None,
+        reply_to_message_id: str | None = None,
+        progress_callback: Callable[[float], Coroutine[Any, Any, None]] | Callable[[float], None] | None = None,
+    ) -> None:
         """Uploads and sends a video file to the Telegram chat."""
         if not self.application:
             raise RuntimeError("Telegram application is not running.")
@@ -92,8 +107,13 @@ class TelegramPlatform(BasePlatform):
             if reply_to_message_id:
                 kwargs["reply_to_message_id"] = int(reply_to_message_id)
                 
+            total_size = file_path.stat().st_size if file_path.exists() else 0
             with open(file_path, "rb") as video_file:
-                kwargs["video"] = video_file
+                if progress_callback and total_size > 0:
+                    wrapped_file = ProgressFileReader(video_file, total_size, progress_callback)
+                    kwargs["video"] = InputFile(wrapped_file, filename=file_path.name, read_file_handle=False)
+                else:
+                    kwargs["video"] = video_file
                 await self.application.bot.send_video(**kwargs)
             logger.info(f"TelegramPlatform: Successfully sent video {file_path} to {chat_id}")
         except Exception as e:

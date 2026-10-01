@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock, ANY
 from src.core.orchestrator import Orchestrator
 from src.platforms.base import BasePlatform
 from src.downloader.shell_runner import DownloadError
@@ -24,7 +24,7 @@ class MockPlatform(BasePlatform):
     async def edit_message(self, chat_id: str, message_id: str, text: str) -> None:
         self.edited_messages.append((chat_id, message_id, text))
 
-    async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None, reply_to_message_id: str | None = None) -> None:
+    async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None, reply_to_message_id: str | None = None, **kwargs) -> None:
         self.sent_videos.append((chat_id, file_path, caption, reply_to_message_id))
 
 @pytest.fixture
@@ -55,7 +55,7 @@ async def test_orchestrator_success(mock_storage, mock_runner, orchestrator, moc
     await orchestrator.handle_request("mock_platform", "12345", "101", url)
     
     # Assert download was called
-    mock_runner.download.assert_called_once_with(url, temp_path)
+    mock_runner.download.assert_called_once_with(url, temp_path, progress_callback=ANY)
     
     # Assert video was sent
     assert len(mock_platform.sent_videos) == 1
@@ -104,3 +104,36 @@ async def test_orchestrator_invalid_url(mock_storage, mock_runner, orchestrator,
     mock_runner.download.assert_not_called()
     mock_storage.generate_path.assert_not_called()
     assert any("Invalid or unsafe URL" in msg[1] for msg in mock_platform.sent_messages)
+
+@pytest.mark.asyncio
+@patch("src.core.orchestrator.shell_runner")
+@patch("src.core.orchestrator.storage_manager")
+async def test_orchestrator_progress_updates(mock_storage, mock_runner, orchestrator, mock_platform):
+    """Verify that progress callbacks update the reply message with percentage and progress bar."""
+    mock_runner.validate_url.return_value = True
+    temp_path = Path("/tmp/downloads/video.mp4")
+    mock_storage.generate_path.return_value = temp_path
+
+    async def fake_download(url, output_path, progress_callback=None):
+        if progress_callback:
+            await progress_callback(42.5)
+        return temp_path
+
+    async def fake_send_video(chat_id, file_path, caption=None, reply_to_message_id=None, progress_callback=None):
+        if progress_callback:
+            await progress_callback(78.0)
+        mock_platform.sent_videos.append((chat_id, file_path, caption, reply_to_message_id))
+
+    mock_runner.download = AsyncMock(side_effect=fake_download)
+    mock_storage.cleanup = AsyncMock(return_value=True)
+    mock_platform.send_video = fake_send_video
+
+    url = "https://youtube.com/watch?v=123"
+    await orchestrator.handle_request("mock_platform", "12345", "101", url)
+
+    # Check that edited messages contain progress info
+    edited_texts = [msg[2] for msg in mock_platform.edited_messages]
+    assert any("Downloading video" in t and "42.5%" in t for t in edited_texts)
+    assert any("Uploading video" in t for t in edited_texts)
+    assert any("Video sent!" in t for t in edited_texts)
+
