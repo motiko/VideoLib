@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 import sys
 import uuid
 from datetime import datetime
@@ -29,7 +30,12 @@ def setup_logger(name: str = "videolib", level: int | None = None) -> logging.Lo
         # 2. File handler under config.LOG_DIR / videolib.log
         try:
             config.LOG_DIR.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(config.LOG_DIR / "videolib.log", encoding="utf-8")
+            file_handler = logging.handlers.RotatingFileHandler(
+                config.LOG_DIR / "videolib.log",
+                maxBytes=10 * 1024 * 1024,  # 10 MB per file
+                backupCount=5,
+                encoding="utf-8",
+            )
             file_handler.setLevel(target_level)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)

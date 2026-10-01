@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 from src.platforms.cli import CliPlatform
-from run import parse_args
+from src.run import parse_args
 
 @pytest.mark.asyncio
 async def test_cli_platform_messaging(capsys, tmp_path):

@@ -2,9 +2,9 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables from .env file if it exists
-# override=True ensures changes to .env overwrite system environment variables
-load_dotenv(override=True)
+# Support explicit env file path (used by launchd service)
+_env_file = os.getenv("VIDEOLIB_ENV_FILE", ".env")
+load_dotenv(dotenv_path=_env_file, override=True)
 
 def _parse_bool(val: str | None, default: bool = False) -> bool:
     if not val:
