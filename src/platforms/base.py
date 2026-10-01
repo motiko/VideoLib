@@ -7,7 +7,7 @@ from typing import Callable, Coroutine, Any
 MessageCallback = Callable[[str, str, str], Coroutine[Any, Any, None]]
 
 class BasePlatform(ABC):
-    """Abstract base class that all platform bot adapters (Telegram, Discord) must implement."""
+    """Abstract base class that all platform bot adapters (Telegram) must implement."""
 
     def __init__(self, name: str):
         self.name = name

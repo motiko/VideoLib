@@ -11,7 +11,7 @@ from src.platforms.telegram import TelegramPlatform
 from src.platforms.cli import CliPlatform
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="CornBot — Multi-Platform Video Downloader Bot")
+    parser = argparse.ArgumentParser(description="VideoLib — Multi-Platform Video Downloader Bot")
     parser.add_argument("--url", type=str, help="Download a single video URL directly via CLI")
     parser.add_argument("--cli", action="store_true", help="Run interactive CLI prompt mode in terminal")
     parser.add_argument("--debug", action="store_true", help="Enable verbose DEBUG logging")
@@ -48,7 +48,7 @@ async def main() -> None:
 
         if args.cli:
             print("\n" + "=" * 60)
-            print("🤖 Welcome to CornBot Interactive CLI")
+            print("🤖 Welcome to VideoLib Interactive CLI")
             print("Type 'exit' or 'quit' to exit.")
             print("=" * 60)
             while True:
@@ -68,8 +68,8 @@ async def main() -> None:
         await cli_platform.stop()
         return
 
-    # 3. Standard Server Mode (Telegram / Discord)
-    logger.info("Starting CornBot Platform Daemon...")
+    # 3. Standard Server Mode (Telegram)
+    logger.info("Starting VideoLib Platform Daemon...")
     orchestrator = Orchestrator()
     platforms_started = 0
 
@@ -80,9 +80,6 @@ async def main() -> None:
         platforms_started += 1
     else:
         logger.warning("TELEGRAM_BOT_TOKEN is not set in environment. Telegram platform will not start.")
-
-    if config.DISCORD_BOT_TOKEN:
-        logger.info("Discord token detected. (Discord integration code can be loaded here in the future.)")
 
     if platforms_started == 0:
         logger.error("No active platforms configured. Set TELEGRAM_BOT_TOKEN or run with --url / --cli.")
@@ -106,7 +103,7 @@ async def main() -> None:
         except NotImplementedError:
             pass
 
-    logger.info("CornBot is online. Press Ctrl+C to stop.")
+    logger.info("VideoLib is online. Press Ctrl+C to stop.")
 
     try:
         await shutdown_event.wait()
@@ -117,7 +114,7 @@ async def main() -> None:
         stop_tasks = [platform.stop() for platform in orchestrator.platforms.values()]
         if stop_tasks:
             await asyncio.gather(*stop_tasks, return_exceptions=True)
-        logger.info("CornBot has been successfully stopped.")
+        logger.info("VideoLib has been successfully stopped.")
 
 if __name__ == "__main__":
     try:

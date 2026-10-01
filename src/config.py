@@ -16,7 +16,6 @@ class Config:
     # Platform Tokens
     TELEGRAM_BOT_TOKEN: str | None = os.getenv("TELEGRAM_BOT_TOKEN")
     TELEGRAM_API_URL: str | None = os.getenv("TELEGRAM_API_URL")
-    DISCORD_BOT_TOKEN: str | None = os.getenv("DISCORD_BOT_TOKEN")
     
     # Storage and Log Paths
     DOWNLOAD_DIR: Path = Path(os.getenv("DOWNLOAD_DIR", "tmp")).resolve()

@@ -1,12 +1,12 @@
 # 🤖 Agent Guidelines & Codebase Conventions
 
-Welcome! If you are an AI developer agent working on **CornBot**, please adhere to the rules, architectural patterns, and security practices documented below.
+Welcome! If you are an AI developer agent working on **VideoLib**, please adhere to the rules, architectural patterns, and security practices documented below.
 
 ---
 
 ## 🎯 Architecture Goals
 
-* **Modular Platform Adapters**: Keep platform-specific code (Telegram, Discord, etc.) strictly isolated in `src/platforms/`. Platform classes must inherit from `BasePlatform` and expose uniform methods.
+* **Modular Platform Adapters**: Keep platform-specific code (Telegram) strictly isolated in `src/platforms/`. Platform classes must inherit from `BasePlatform` and expose uniform methods.
 * **Strict Non-Blocking Loop**: Video downloading can take seconds or minutes. Never block the main asyncio loop. Always use async subprocesses or execute blocking tasks in an executor (`asyncio.to_thread`).
 * **Guaranteed Disk Cleanup**: Ensure that every downloaded file is cleaned up, regardless of whether the transfer succeeded or failed.
 
@@ -72,7 +72,7 @@ async def process_request(url: str, chat_id: str):
 ## 🧪 Testing Strategies
 
 * **Mock Subprocesses**: When writing tests, mock `asyncio.create_subprocess_exec` to avoid making real network requests and running external binaries.
-* **Mock Platform APIs**: Mock the Telegram Bot API and Discord Client to isolate internal business logic from real API roundtrips.
+* **Mock Platform APIs**: Mock the Telegram Bot API to isolate internal business logic from real API roundtrips.
 * **Test Runner**: Use `pytest` for running unit and integration tests.
 
 To run tests:
@@ -84,7 +84,7 @@ pytest tests/
 
 ## 🚦 Feature Implementation Flow
 
-When tasked with implementing a feature (e.g., "Add Discord platform"):
+When tasked with implementing a feature (e.g., "Add a new feature"):
 1. Check [README.md](file:///Users/k/cornbot/README.md) for architecture.
 2. Create your file under the correct namespace.
 3. Hook into the orchestrator inside `src/core/orchestrator.py` without modifying the core download logic.

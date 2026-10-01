@@ -86,7 +86,7 @@ class TelegramPlatform(BasePlatform):
         """Replies to the /start command."""
         chat_id = str(update.effective_chat.id)
         welcome_text = (
-            "🤖 **Welcome to CornBot!**\n\n"
+            "🤖 **Welcome to VideoLib!**\n\n"
             "Send me a message containing a video URL (e.g. YouTube, TikTok, Twitter/X), "
             "and I will download and send you the video file directly."
         )
@@ -96,7 +96,7 @@ class TelegramPlatform(BasePlatform):
         """Replies to the /help command."""
         chat_id = str(update.effective_chat.id)
         help_text = (
-            "💡 **How to use CornBot:**\n\n"
+            "💡 **How to use VideoLib:**\n\n"
             "1. Copy the URL of any video.\n"
             "2. Paste it here in the chat.\n"
             "3. Wait for the download to complete and receive your file.\n\n"

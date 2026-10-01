@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from src.config import config
 
-def setup_logger(name: str = "cornbot", level: int | None = None) -> logging.Logger:
+def setup_logger(name: str = "videolib", level: int | None = None) -> logging.Logger:
     """Configures and returns a standard logger with stdout and file handlers."""
     logger = logging.getLogger(name)
     
@@ -26,10 +26,10 @@ def setup_logger(name: str = "cornbot", level: int | None = None) -> logging.Log
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
         
-        # 2. File handler under config.LOG_DIR / cornbot.log
+        # 2. File handler under config.LOG_DIR / videolib.log
         try:
             config.LOG_DIR.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(config.LOG_DIR / "cornbot.log", encoding="utf-8")
+            file_handler = logging.FileHandler(config.LOG_DIR / "videolib.log", encoding="utf-8")
             file_handler.setLevel(target_level)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
@@ -53,7 +53,7 @@ def save_failure_log(url: str, command: str, exit_code: int, stdout: str, stderr
     
     report_content = (
         f"=" * 80 + "\n"
-        f"CornBot Video Download Failure Diagnostic Report\n"
+        f"VideoLib Video Download Failure Diagnostic Report\n"
         f"=" * 80 + "\n"
         f"Timestamp:      {datetime.now().isoformat()}\n"
         f"Target URL:     {url}\n"
