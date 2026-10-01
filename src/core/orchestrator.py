@@ -4,6 +4,7 @@ import inspect
 import time
 from pathlib import Path
 from src.config import config
+from src.core.errors import classify_download_error, classify_upload_error, format_error_message
 from src.downloader.shell_runner import shell_runner, DownloadError
 from src.storage.manager import storage_manager
 from src.platforms.base import BasePlatform
@@ -173,16 +174,22 @@ class Orchestrator:
 
         except DownloadError as de:
             logger.warning(f"Orchestrator: Download failed for {url} in chat {chat_id}: {de}")
+            user_error = classify_download_error(str(de))
+            error_text = format_error_message(user_error)
             if status_msg_id:
-                await platform.edit_message(chat_id, status_msg_id, f"❌ Download error: {str(de)}")
+                await platform.edit_message(chat_id, status_msg_id, error_text)
             else:
-                await platform.send_message(chat_id, f"❌ Download error: {str(de)}", reply_to_message_id=message_id)
+                await platform.send_message(chat_id, error_text, reply_to_message_id=message_id)
+            await platform.react_to_message(chat_id, message_id, "👎")
         except Exception as e:
             logger.exception(f"Orchestrator: Unexpected exception occurred handling URL {url} in chat {chat_id}: {e}")
+            user_error = classify_upload_error(str(e))
+            error_text = format_error_message(user_error)
             if status_msg_id:
-                await platform.edit_message(chat_id, status_msg_id, "❌ An unexpected error occurred while processing your request.")
+                await platform.edit_message(chat_id, status_msg_id, error_text)
             else:
-                await platform.send_message(chat_id, "❌ An unexpected error occurred while processing your request.", reply_to_message_id=message_id)
+                await platform.send_message(chat_id, error_text, reply_to_message_id=message_id)
+            await platform.react_to_message(chat_id, message_id, "👎")
         finally:
             # Guarantee cleanup of files to prevent filling up the disk
             if file_path:

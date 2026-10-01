@@ -9,6 +9,8 @@ from src.utils.logger import logger
 from src.utils.progress import ProgressFileReader
 from src.config import config
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
 class TelegramPlatform(BasePlatform):
     """Platform adapter for Telegram using python-telegram-bot."""
 
@@ -73,7 +75,7 @@ class TelegramPlatform(BasePlatform):
             if "parse" in str(e).lower() and kwargs.get("parse_mode") == "HTML":
                 try:
                     kwargs.pop("parse_mode", None)
-                    kwargs["text"] = text.replace("<code>", "").replace("</code>", "").replace("<pre>", "").replace("</pre>", "")
+                    kwargs["text"] = _HTML_TAG_RE.sub("", text)
                     msg = await self.application.bot.send_message(**kwargs)
                     return str(msg.message_id)
                 except Exception as e2:
@@ -105,7 +107,7 @@ class TelegramPlatform(BasePlatform):
             if "parse" in err_str and kwargs.get("parse_mode") == "HTML":
                 try:
                     kwargs.pop("parse_mode", None)
-                    kwargs["text"] = text.replace("<code>", "").replace("</code>", "").replace("<pre>", "").replace("</pre>", "")
+                    kwargs["text"] = _HTML_TAG_RE.sub("", text)
                     await self.application.bot.edit_message_text(**kwargs)
                     return
                 except Exception as e2:
