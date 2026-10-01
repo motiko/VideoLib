@@ -80,8 +80,6 @@ class Orchestrator:
                     reply_to_message_id=message_id,
                 )
                 
-                await tracker.update("✅ Video sent!", force=True)
-                
         except DownloadError as de:
             logger.warning(f"Orchestrator: Download failed for {url} in chat {chat_id}: {de}")
             if status_msg_id:

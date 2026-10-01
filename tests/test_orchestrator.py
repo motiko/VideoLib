@@ -138,5 +138,4 @@ async def test_orchestrator_progress_updates(mock_storage, mock_runner, orchestr
     assert any("Speed: 2.50MiB/s" in t for t in edited_texts)
     assert any("Size: 15.00MiB" in t for t in edited_texts)
     assert any("Uploading video" in t for t in edited_texts)
-    assert any("Video sent!" in t for t in edited_texts)
 
