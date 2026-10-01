@@ -180,3 +180,86 @@ async def test_handle_message_blocks_unauthorized_by_default(telegram_platform):
     await platform._handle_message(update, context)
     # Callback should now be invoked
     assert callback_mock.call_count == 1
+
+@pytest.mark.asyncio
+async def test_admin_allowgroup_in_group_chat(telegram_platform):
+    platform, mgr = telegram_platform
+    admin_id = 9999
+    group_id = -1001122334455
+
+    with patch("src.config.config.ADMIN_USERS", {admin_id}):
+        update, context = make_update(user_id=admin_id, text="/allowgroup")
+        update.effective_chat.id = group_id
+        update.effective_chat.type = "supergroup"
+        update.effective_chat.title = "Movie Night Chat"
+
+        await platform._handle_allowgroup(update, context)
+
+        assert mgr.is_group_allowed(group_id) is True
+        msg = platform.send_message.call_args[0][1]
+        assert "Movie Night Chat" in msg
+        assert "now authorized" in msg
+
+        # Check /allowedgroups
+        await platform._handle_allowedgroups(update, context)
+        msg_list = platform.send_message.call_args[0][1]
+        assert "Authorized Groups" in msg_list
+        assert "Movie Night Chat" in msg_list
+
+        # Disallow
+        await platform._handle_disallowgroup(update, context)
+        assert mgr.is_group_allowed(group_id) is False
+        msg_dis = platform.send_message.call_args[0][1]
+        assert "Revoked authorization" in msg_dis
+
+@pytest.mark.asyncio
+async def test_admin_allowgroup_with_explicit_id(telegram_platform):
+    platform, mgr = telegram_platform
+    admin_id = 9999
+    group_id = -1007788990011
+
+    with patch("src.config.config.ADMIN_USERS", {admin_id}):
+        # In DM, admin runs: /allowgroup -1007788990011 Custom Title
+        update, context = make_update(user_id=admin_id, text=f"/allowgroup {group_id} Custom Title")
+        await platform._handle_allowgroup(update, context)
+
+        assert mgr.is_group_allowed(group_id) is True
+        msg = platform.send_message.call_args[0][1]
+        assert "Custom Title" in msg
+        assert str(group_id) in msg
+
+        # Disallow by ID in DM
+        update_dis, context_dis = make_update(user_id=admin_id, text=f"/disallowgroup {group_id}")
+        await platform._handle_disallowgroup(update_dis, context_dis)
+        assert mgr.is_group_allowed(group_id) is False
+
+@pytest.mark.asyncio
+async def test_group_member_download_permission(telegram_platform):
+    platform, mgr = telegram_platform
+    group_id = -1005544332211
+    member_id = 4444
+    callback_mock = AsyncMock()
+    platform.register_callback(callback_mock)
+
+    # 1. Initially, group is NOT allowlisted, user is NOT allowlisted -> blocked
+    update, context = make_update(
+        user_id=member_id,
+        username="regular_member",
+        text="@mybot https://youtube.com/watch?v=xyz",
+    )
+    update.effective_chat.id = group_id
+    update.effective_chat.type = "supergroup"
+    context.bot.username = "mybot"
+
+    await platform._handle_message(update, context)
+    callback_mock.assert_not_called()
+    msg = platform.send_message.call_args[0][1]
+    assert "Access restricted" in msg
+
+    # 2. Authorize group
+    mgr.allow_group(group_id, title="Test Supergroup", allowed=True)
+
+    # 3. Message should now be accepted and callback called
+    await platform._handle_message(update, context)
+    assert callback_mock.call_count == 1
+

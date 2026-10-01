@@ -74,6 +74,17 @@ class AccessManager:
                 )
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS allowed_groups (
+                    group_id INTEGER PRIMARY KEY,
+                    title TEXT,
+                    is_allowed INTEGER DEFAULT 1,
+                    created_at TEXT,
+                    updated_at TEXT
+                )
+                """
+            )
 
             # Seed default tiered settings if not present
             defaults = {
@@ -184,6 +195,48 @@ class AccessManager:
             )
             conn.commit()
 
+    def allow_group(self, group_id: int, title: str | None = None, allowed: bool = True) -> None:
+        """Grants or revokes allowlist authorization for an entire group chat."""
+        now_str = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO allowed_groups (group_id, title, is_allowed, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(group_id) DO UPDATE SET
+                    title = coalesce(excluded.title, allowed_groups.title),
+                    is_allowed = excluded.is_allowed,
+                    updated_at = excluded.updated_at
+                """,
+                (group_id, title, 1 if allowed else 0, now_str, now_str),
+            )
+            conn.commit()
+
+    def is_group_allowed(self, group_id: int) -> bool:
+        """Checks if a group chat is authorized."""
+        with self._lock, self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT is_allowed FROM allowed_groups WHERE group_id = ?",
+                (group_id,),
+            )
+            row = cursor.fetchone()
+            return bool(row and row["is_allowed"])
+
+    def get_all_allowed_groups(self) -> list[dict[str, Any]]:
+        """Returns list of all authorized group records."""
+        with self._lock, self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT group_id, title, is_allowed, created_at, updated_at
+                FROM allowed_groups WHERE is_allowed = 1
+                ORDER BY group_id ASC
+                """
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
     def set_user_limits(
         self,
         user_id: int,
@@ -282,7 +335,7 @@ class AccessManager:
                 )
             conn.commit()
 
-    def get_user_limits(self, user_id: int) -> tuple[int, int, str]:
+    def get_user_limits(self, user_id: int, chat_id: int | None = None) -> tuple[int, int, str]:
         """Returns (daily_mb, daily_downloads, tier_label)."""
         if self.is_admin(user_id):
             return 0, 0, "👑 Administrator (Unlimited)"
@@ -296,7 +349,10 @@ class AccessManager:
             row = cursor.fetchone()
 
         is_allowed = bool(row and row["is_allowed"])
-        tier_name = "allowlist" if is_allowed else "public"
+        is_group_ok = bool(chat_id is not None and self.is_group_allowed(chat_id))
+
+        effective_allowlist = is_allowed or is_group_ok
+        tier_name = "allowlist" if effective_allowlist else "public"
         tier_mb, tier_dl = self.get_tier_limits(tier_name)
 
         if row and (row["custom_daily_mb"] is not None or row["custom_daily_downloads"] is not None):
@@ -306,6 +362,8 @@ class AccessManager:
 
         if is_allowed:
             return tier_mb, tier_dl, "🌟 Allowlist Tier"
+        elif is_group_ok:
+            return tier_mb, tier_dl, "👥 Group Allowlist Tier"
         else:
             return tier_mb, tier_dl, "🌐 Public Tier"
 
@@ -323,24 +381,25 @@ class AccessManager:
                 return row["downloads_count"], row["bytes_downloaded"]
             return 0, 0
 
-    def check_can_download(self, user_id: int) -> tuple[bool, str | None]:
+    def check_can_download(self, user_id: int, chat_id: int | None = None) -> tuple[bool, str | None]:
         """Evaluates whether the user is permitted to start a download."""
         # 1. Admins bypass all restrictions
         if self.is_admin(user_id):
             return True, None
 
-        # 2. Check allowlist status
+        # 2. Check allowlist status: user-specific or group-wide
         is_allowed = self.is_user_allowed(user_id)
+        is_group_ok = bool(chat_id is not None and self.is_group_allowed(chat_id))
 
-        # 3. If not in allowlist, check if public access has been opened by an admin
-        if not is_allowed and not self.is_public_access_enabled():
+        # 3. If neither user nor group is allowlisted, check if public access is opened
+        if not is_allowed and not is_group_ok and not self.is_public_access_enabled():
             return (
                 False,
-                "⛔ Access restricted: Only authorized users can download videos with this bot. Please contact the administrator to get access.",
+                "⛔ Access restricted: Only authorized users or allowed groups can download videos with this bot. Please contact the administrator to get access.",
             )
 
         # 4. Check quota against the user's tier limits
-        limit_mb, limit_dl, _ = self.get_user_limits(user_id)
+        limit_mb, limit_dl, _ = self.get_user_limits(user_id, chat_id=chat_id)
         used_dl, used_bytes = self.get_user_usage_today(user_id)
 
         if limit_dl > 0 and used_dl >= limit_dl:

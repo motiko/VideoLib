@@ -171,3 +171,42 @@ def test_reset_user_usage_and_stats(temp_access_manager):
     dls, bytes_used = mgr.get_user_usage_today(user_id)
     assert dls == 0
     assert bytes_used == 0
+
+def test_group_access_control(temp_access_manager):
+    mgr = temp_access_manager
+    group_id = -1001234567890
+    user_id = 9001
+
+    # Initially group is not allowed
+    assert mgr.is_group_allowed(group_id) is False
+    assert mgr.is_public_access_enabled() is False
+
+    # User in group cannot download initially
+    can_dl, reason = mgr.check_can_download(user_id, chat_id=group_id)
+    assert can_dl is False
+    assert "Access restricted" in reason
+
+    # Allow group
+    mgr.allow_group(group_id, title="Cool Video Chat", allowed=True)
+    assert mgr.is_group_allowed(group_id) is True
+
+    # User in group can now download under group allowlist tier
+    can_dl, reason = mgr.check_can_download(user_id, chat_id=group_id)
+    assert can_dl is True
+    assert reason is None
+
+    mb, dl, tier = mgr.get_user_limits(user_id, chat_id=group_id)
+    assert "Group Allowlist Tier" in tier
+
+    # Groups list returns the group
+    groups = mgr.get_all_allowed_groups()
+    assert len(groups) == 1
+    assert groups[0]["group_id"] == group_id
+    assert groups[0]["title"] == "Cool Video Chat"
+
+    # Revoke group
+    mgr.allow_group(group_id, allowed=False)
+    assert mgr.is_group_allowed(group_id) is False
+    can_dl, _ = mgr.check_can_download(user_id, chat_id=group_id)
+    assert can_dl is False
+

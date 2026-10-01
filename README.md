@@ -243,8 +243,9 @@ brew services restart videolib
 VideoLib includes built-in tiered access control and daily bandwidth/download quotas backed by SQLite persistence.
 
 * **Default Policy**: Only bot administrators and explicitly allowlisted users are permitted to download videos.
+* **Group Authorization**: Administrators can authorize entire group chats (`/allowgroup`), enabling all members of that group to download videos under the Allowlist tier.
 * **Public Access**: Administrators can open access to everyone using `/publicaccess on`.
-* **Separate Limit Tiers**: Allowlisted users and public users ("the rest") have distinct, independently configurable daily quotas.
+* **Separate Limit Tiers**: Allowlisted users, authorized group members, and public users ("the rest") have distinct, independently configurable daily quotas.
 
 ### Configuration (`.env`)
 ```ini
@@ -275,6 +276,9 @@ DB_PATH=data/videolib.db
 * `/allow <@user | user_id>`: Grant allowlist access to a user (or reply to their message).
 * `/disallow <@user | user_id>`: Revoke a user's allowlist access.
 * `/allowed`: List all currently authorized allowlist users and their custom limits.
+* `/allowgroup [group_id] [title]` (aliases: `/allowthisgroup`, `/whitelistgroup`): Authorize all members of a group to download videos under the Allowlist tier. Run directly inside the group chat without arguments or specify `group_id`.
+* `/disallowgroup [group_id]` (aliases: `/disallowthisgroup`, `/revokegroup`): Revoke authorization for a group chat.
+* `/allowedgroups`: List all authorized group chats.
 * `/adjustlimits <@user | user_id> [mb=N] [dl=N] [reset]`: Assign individual custom VIP limits to a specific user (or `reset` to tier defaults).
 * `/showusage [@user | user_id]`: View detailed stats for a user, or overall bot traffic summary if no user is specified.
 * `/resetusage <@user | user_id>`: Reset a user's daily usage counters to zero.

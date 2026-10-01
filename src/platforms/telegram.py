@@ -4,6 +4,7 @@ import re
 from typing import Callable, Coroutine, Any
 from pathlib import Path
 from telegram import Update, InputFile, LinkPreviewOptions
+from telegram.constants import ChatType
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from src.platforms.base import BasePlatform
 from src.utils.logger import logger
@@ -51,6 +52,13 @@ class TelegramPlatform(BasePlatform):
         self.application.add_handler(CommandHandler("publicaccess", self._handle_publicaccess))
         self.application.add_handler(CommandHandler("allowall", self._handle_publicaccess))
         self.application.add_handler(CommandHandler("allowed", self._handle_allowed))
+        self.application.add_handler(CommandHandler("allowgroup", self._handle_allowgroup))
+        self.application.add_handler(CommandHandler("allowthisgroup", self._handle_allowgroup))
+        self.application.add_handler(CommandHandler("whitelistgroup", self._handle_allowgroup))
+        self.application.add_handler(CommandHandler("disallowgroup", self._handle_disallowgroup))
+        self.application.add_handler(CommandHandler("disallowthisgroup", self._handle_disallowgroup))
+        self.application.add_handler(CommandHandler("revokegroup", self._handle_disallowgroup))
+        self.application.add_handler(CommandHandler("allowedgroups", self._handle_allowedgroups))
         self.application.add_handler(CommandHandler("resetusage", self._handle_resetusage))
         self.application.add_handler(CommandHandler("adminhelp", self._handle_adminhelp))
         self.application.add_handler(CommandHandler("debug_upload", self._handle_debug_upload))
@@ -315,10 +323,11 @@ class TelegramPlatform(BasePlatform):
 
         access_manager.record_user(user.id, user.username, user.first_name)
         is_admin = access_manager.is_admin(user.id)
-        limit_mb, limit_dl, tier_label = access_manager.get_user_limits(user.id)
+        effective_chat_id = update.effective_chat.id if update.effective_chat else None
+        limit_mb, limit_dl, tier_label = access_manager.get_user_limits(user.id, chat_id=effective_chat_id)
         used_dl, used_bytes = access_manager.get_user_usage_today(user.id)
         used_mb = used_bytes / (1024 * 1024)
-        can_dl, _ = access_manager.check_can_download(user.id)
+        can_dl, _ = access_manager.check_can_download(user.id, chat_id=effective_chat_id)
 
         if is_admin:
             status_desc = "👑 Administrator (Unlimited Quota)"
@@ -630,6 +639,101 @@ class TelegramPlatform(BasePlatform):
         access_manager.reset_user_usage(uid)
         await self.send_message(chat_id, f"🔄 Today's downloads and traffic for {name} (ID: <code>{uid}</code>) have been reset to 0.")
 
+    async def _handle_allowgroup(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Admin command to whitelist all members of a group chat: /allowgroup [group_id] [title]."""
+        chat_id = str(update.effective_chat.id)
+        if not self._require_admin(update):
+            await self.send_message(chat_id, "⛔ This command is restricted to bot administrators.")
+            return
+
+        chat = update.effective_chat
+        args = list(context.args or [])
+        is_group_chat = chat and (chat.type in (ChatType.GROUP, ChatType.SUPERGROUP) or chat.id < 0)
+
+        target_gid: int | None = None
+        title: str | None = None
+
+        if args:
+            try:
+                target_gid = int(args[0])
+                title = " ".join(args[1:]) if len(args) > 1 else None
+            except ValueError:
+                if is_group_chat:
+                    target_gid = chat.id
+                    title = " ".join(args)
+                else:
+                    await self.send_message(
+                        chat_id,
+                        "⚠️ Please provide a valid numeric Group ID (e.g. <code>/allowgroup -1001234567890 [title]</code>) or run <code>/allowthisgroup</code> inside the group."
+                    )
+                    return
+        elif is_group_chat:
+            target_gid = chat.id
+            title = chat.title
+        else:
+            await self.send_message(
+                chat_id,
+                "⚠️ Usage: <code>/allowgroup &lt;group_id&gt; [title]</code> or run <code>/allowthisgroup</code> directly inside the group chat."
+            )
+            return
+
+        display_title = title or (chat.title if target_gid == chat.id else f"Group {target_gid}")
+        access_manager.allow_group(target_gid, title=display_title, allowed=True)
+        await self.send_message(
+            chat_id,
+            f"✅ Group <b>{display_title}</b> (ID: <code>{target_gid}</code>) is now authorized!\n"
+            "All members of this group can download videos under the Allowlist Tier."
+        )
+
+    async def _handle_disallowgroup(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Admin command to revoke a group's allowlist authorization: /disallowgroup [group_id]."""
+        chat_id = str(update.effective_chat.id)
+        if not self._require_admin(update):
+            await self.send_message(chat_id, "⛔ This command is restricted to bot administrators.")
+            return
+
+        chat = update.effective_chat
+        args = list(context.args or [])
+        is_group_chat = chat and (chat.type in (ChatType.GROUP, ChatType.SUPERGROUP) or chat.id < 0)
+
+        target_gid: int | None = None
+        if args:
+            try:
+                target_gid = int(args[0])
+            except ValueError:
+                await self.send_message(chat_id, "⚠️ Please provide a valid numeric Group ID.")
+                return
+        elif is_group_chat:
+            target_gid = chat.id
+        else:
+            await self.send_message(
+                chat_id,
+                "⚠️ Usage: <code>/disallowgroup &lt;group_id&gt;</code> or run <code>/disallowthisgroup</code> directly inside the group chat."
+            )
+            return
+
+        access_manager.allow_group(target_gid, allowed=False)
+        await self.send_message(chat_id, f"🚫 Revoked authorization for group (ID: <code>{target_gid}</code>).")
+
+    async def _handle_allowedgroups(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Admin command to list all authorized groups: /allowedgroups."""
+        chat_id = str(update.effective_chat.id)
+        if not self._require_admin(update):
+            await self.send_message(chat_id, "⛔ This command is restricted to bot administrators.")
+            return
+
+        groups = access_manager.get_all_allowed_groups()
+        if not groups:
+            await self.send_message(chat_id, "📋 No authorized groups found.")
+            return
+
+        lines = [f"👥 <b>Authorized Groups ({len(groups)}):</b>\n"]
+        for g in groups:
+            title = g["title"] or f"Group {g['group_id']}"
+            lines.append(f"• <b>{title}</b> [<code>{g['group_id']}</code>]")
+
+        await self.send_message(chat_id, "\n".join(lines))
+
     async def _handle_adminhelp(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Admin command cheatsheet."""
         chat_id = str(update.effective_chat.id)
@@ -644,6 +748,10 @@ class TelegramPlatform(BasePlatform):
             "• <code>/allow &lt;@user | id&gt;</code> - Grant allowlist access to a user\n"
             "• <code>/disallow &lt;@user | id&gt;</code> - Revoke allowlist access\n"
             "• <code>/allowed</code> - List all authorized allowlist users\n\n"
+            "<b>Group Access:</b>\n"
+            "• <code>/allowgroup [group_id]</code> - Authorize all members of a group (or run inside group)\n"
+            "• <code>/disallowgroup [group_id]</code> - Revoke authorization for a group\n"
+            "• <code>/allowedgroups</code> - List all authorized groups\n\n"
             "<b>Tiered Limits & Quotas:</b>\n"
             "• <code>/setlimit allowlist mb=1500 dl=25</code> - Set allowlist tier limits\n"
             "• <code>/setlimit public mb=200 dl=3</code> - Set public tier limits\n"
@@ -663,8 +771,6 @@ class TelegramPlatform(BasePlatform):
         text = update.message.text.strip()
         chat = update.effective_chat
         chat_id = str(chat.id)
-
-        from telegram.constants import ChatType
 
         if chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
             bot_username = context.bot.username
@@ -699,7 +805,7 @@ class TelegramPlatform(BasePlatform):
             access_manager.record_user(user.id, user.username, user.first_name)
 
         if user_id:
-            can_dl, reason = access_manager.check_can_download(user_id)
+            can_dl, reason = access_manager.check_can_download(user_id, chat_id=chat.id)
             if not can_dl:
                 await self.send_message(
                     chat_id,
