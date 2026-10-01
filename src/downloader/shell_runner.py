@@ -120,22 +120,30 @@ class ShellRunner:
             raise DownloadError(f"Download command exited with code {exit_code}: {stderr_str.strip()[:500]}")
 
         # Check if the output file actually exists
-        if not output_path.exists():
-            missing_msg = "Downloaded file could not be found on disk."
-            logger.error(f"ShellRunner: Command reported success, but output file is missing: {output_path}")
-            save_failure_log(url, cmd_str, exit_code, stdout_str, missing_msg)
-            raise DownloadError(missing_msg)
+        actual_output_path = output_path
+        if not actual_output_path.exists():
+            # yt-dlp may have changed or appended the extension (e.g. .mp4.webm)
+            candidates = list(actual_output_path.parent.glob(f"{actual_output_path.stem}.*"))
+            # Filter out temporary files
+            candidates = [c for c in candidates if not c.suffix.endswith(('part', 'ytdl'))]
+            if candidates:
+                actual_output_path = candidates[0]
+            else:
+                missing_msg = "Downloaded file could not be found on disk."
+                logger.error(f"ShellRunner: Command reported success, but output file is missing: {output_path}")
+                save_failure_log(url, cmd_str, exit_code, stdout_str, missing_msg)
+                raise DownloadError(missing_msg)
 
         # Check file size limit
-        file_size_mb = output_path.stat().st_size / (1024 * 1024)
+        file_size_mb = actual_output_path.stat().st_size / (1024 * 1024)
         if file_size_mb > self.max_file_size_mb:
             size_msg = f"Downloaded file ({file_size_mb:.1f}MB) exceeds the maximum limit of {self.max_file_size_mb}MB."
             logger.warning(f"ShellRunner: {size_msg}")
             save_failure_log(url, cmd_str, exit_code, stdout_str, size_msg)
             raise DownloadError(size_msg)
 
-        logger.info(f"ShellRunner: Successfully downloaded video file to '{output_path}' ({file_size_mb:.2f}MB)")
-        return output_path
+        logger.info(f"ShellRunner: Successfully downloaded video file to '{actual_output_path}' ({file_size_mb:.2f}MB)")
+        return actual_output_path
 
 # Global shell runner instance
 shell_runner = ShellRunner(config.DOWNLOAD_COMMAND, config.MAX_FILE_SIZE_MB)

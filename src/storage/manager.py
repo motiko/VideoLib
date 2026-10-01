@@ -52,10 +52,13 @@ class StorageManager:
         # Perform deletion in a separate thread to prevent blocking the async loop
         try:
             def remove_file():
-                if file_path.exists():
-                    file_path.unlink()
-                    return True
-                return False
+                deleted_any = False
+                # Remove all files that share the same stem (e.g. .mp4, .mp4.webm, .part)
+                for f in file_path.parent.glob(f"{file_path.stem}.*"):
+                    if f.exists():
+                        f.unlink()
+                        deleted_any = True
+                return deleted_any
 
             deleted = await asyncio.to_thread(remove_file)
             if deleted:
