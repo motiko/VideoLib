@@ -96,9 +96,7 @@ videolib/
 * **FFmpeg**: Required by many downloader packages (like `yt-dlp`) for merging/transcoding video.
   * *macOS*: `brew install ffmpeg`
   * *Linux (Ubuntu)*: `sudo apt install ffmpeg`
-* **yt-dlp** (or your downloader of choice):
-  * *macOS*: `brew install yt-dlp`
-  * *Linux (Ubuntu)*: `sudo apt install yt-dlp` or install via pip.
+
 
 ### Installation
 
