@@ -1,12 +1,21 @@
 import asyncio
+import contextlib
 import inspect
+import time
 from pathlib import Path
 from src.config import config
 from src.downloader.shell_runner import shell_runner, DownloadError
 from src.storage.manager import storage_manager
 from src.platforms.base import BasePlatform
 from src.utils.logger import logger
-from src.utils.progress import MessageProgressTracker, format_progress_bar
+from src.utils.progress import (
+    MessageProgressTracker,
+    format_progress_bar,
+    run_estimated_upload_ticker,
+    upload_speed_estimator,
+    format_speed,
+    DownloadProgress,
+)
 
 class Orchestrator:
     """Coordinates downloading tasks and routes messages between the platforms, downloader, and storage manager."""
@@ -70,15 +79,45 @@ class Orchestrator:
                     progress_callback=on_download_progress
                 )
                 
-                await tracker.update("📤 Download complete. Uploading video to chat...", force=True)
-                
-                # Deliver the file
-                await platform.send_video(
-                    chat_id=chat_id,
-                    file_path=downloaded_file,
-                    caption="Here is your video!",
-                    reply_to_message_id=message_id,
-                )
+                # Deliver the file with background estimated upload ticker
+                file_size_bytes = downloaded_file.stat().st_size if downloaded_file.exists() else 0
+                upload_start = time.monotonic()
+                ticker_task = None
+                if status_msg_id and file_size_bytes > 0:
+                    ticker_task = asyncio.create_task(
+                        run_estimated_upload_ticker(tracker, file_size_bytes, upload_speed_estimator)
+                    )
+
+                try:
+                    await platform.send_video(
+                        chat_id=chat_id,
+                        file_path=downloaded_file,
+                        caption="Here is your video!",
+                        reply_to_message_id=message_id,
+                    )
+                finally:
+                    if ticker_task:
+                        ticker_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await ticker_task
+
+                upload_duration = time.monotonic() - upload_start
+                if file_size_bytes > 0 and upload_duration > 0.5:
+                    upload_speed_estimator.record_upload(file_size_bytes, upload_duration)
+                    actual_speed = file_size_bytes / upload_duration
+                else:
+                    actual_speed = upload_speed_estimator.get_speed_bps()
+
+                # Complete status message at 100%
+                if status_msg_id and file_size_bytes > 0:
+                    size_mb = file_size_bytes / (1024 * 1024)
+                    final_prog = DownloadProgress(
+                        100.0,
+                        eta="00:00",
+                        speed=format_speed(actual_speed),
+                        size=f"{size_mb:.2f}MiB",
+                    )
+                    await tracker.update(format_progress_bar("📤 Uploading to chat", final_prog), force=True)
                 
         except DownloadError as de:
             logger.warning(f"Orchestrator: Download failed for {url} in chat {chat_id}: {de}")

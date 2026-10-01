@@ -108,11 +108,12 @@ async def test_orchestrator_invalid_url(mock_storage, mock_runner, orchestrator,
 @pytest.mark.asyncio
 @patch("src.core.orchestrator.shell_runner")
 @patch("src.core.orchestrator.storage_manager")
-async def test_orchestrator_progress_updates(mock_storage, mock_runner, orchestrator, mock_platform):
+async def test_orchestrator_progress_updates(mock_storage, mock_runner, orchestrator, mock_platform, tmp_path):
     """Verify that progress callbacks update the reply message with percentage, progress bar, ETA, and speed."""
     from src.utils.progress import DownloadProgress
     mock_runner.validate_url.return_value = True
-    temp_path = Path("/tmp/downloads/video.mp4")
+    temp_path = tmp_path / "video.mp4"
+    temp_path.write_bytes(b"A" * 10000)
     mock_storage.generate_path.return_value = temp_path
 
     async def fake_download(url, output_path, progress_callback=None):
@@ -137,5 +138,5 @@ async def test_orchestrator_progress_updates(mock_storage, mock_runner, orchestr
     assert any("ETA: 00:05" in t for t in edited_texts)
     assert any("Speed: 2.50MiB/s" in t for t in edited_texts)
     assert any("Size: 15.00MiB" in t for t in edited_texts)
-    assert any("Uploading video" in t for t in edited_texts)
+    assert any("Uploading to chat" in t for t in edited_texts)
 

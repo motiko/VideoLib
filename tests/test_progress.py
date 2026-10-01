@@ -76,3 +76,46 @@ async def test_message_progress_tracker_throttling():
     await tracker.update("Step 1: 50%")
     assert len(platform.edits) == 3
     assert platform.edits[-1][2] == "Step 1: 50%"
+
+def test_format_eta_and_speed():
+    from src.utils.progress import format_eta, format_speed
+    assert format_eta(15) == "00:15"
+    assert format_eta(75) == "01:15"
+    assert format_eta(3665) == "01:01:05"
+
+    assert format_speed(3.5 * 1024 * 1024) == "3.50MiB/s"
+    assert format_speed(500 * 1024) == "500.0KiB/s"
+
+def test_upload_speed_estimator():
+    from src.utils.progress import UploadSpeedEstimator
+    est = UploadSpeedEstimator(default_speed_mb=2.0)
+    assert est.get_speed_bps() == 2.0 * 1024 * 1024
+
+    # 10MB in 2 seconds = 5MB/s
+    # 0.7 * 5 + 0.3 * 2 = 3.5 + 0.6 = 4.1MB/s
+    est.record_upload(10 * 1024 * 1024, 2.0)
+    expected_mb = 4.1
+    actual_mb = est.get_speed_bps() / (1024 * 1024)
+    assert abs(actual_mb - expected_mb) < 0.01
+
+@pytest.mark.asyncio
+async def test_run_estimated_upload_ticker():
+    from src.utils.progress import run_estimated_upload_ticker, UploadSpeedEstimator
+    platform = DummyPlatform()
+    tracker = MessageProgressTracker(platform, "chat123", "msg456", min_interval=0.01)
+    estimator = UploadSpeedEstimator(default_speed_mb=10.0)
+
+    # File size 10MB
+    file_size = 10 * 1024 * 1024
+    task = asyncio.create_task(
+        run_estimated_upload_ticker(tracker, file_size, estimator, update_interval=0.05)
+    )
+
+    await asyncio.sleep(0.12)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert len(platform.edits) >= 1
+    assert any("Uploading to chat" in edit[2] for edit in platform.edits)
+    assert any("Size: 10.00MiB" in edit[2] for edit in platform.edits)

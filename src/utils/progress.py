@@ -57,6 +57,79 @@ def format_progress_bar(
         return f"{header}\n{' | '.join(details)}"
     return header
 
+def format_eta(seconds: int) -> str:
+    """Formats seconds into MM:SS or HH:MM:SS."""
+    seconds = max(0, seconds)
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+def format_speed(bytes_per_sec: float) -> str:
+    """Formats bytes per second into human-readable speed (MiB/s or KiB/s)."""
+    mb_per_sec = bytes_per_sec / (1024 * 1024)
+    if mb_per_sec >= 1.0:
+        return f"{mb_per_sec:.2f}MiB/s"
+    kb_per_sec = bytes_per_sec / 1024
+    return f"{kb_per_sec:.1f}KiB/s"
+
+class UploadSpeedEstimator:
+    """Tracks and updates an exponentially weighted moving average of upload speed."""
+
+    def __init__(self, default_speed_mb: float = 3.8):
+        self.current_speed_bps = default_speed_mb * 1024 * 1024
+
+    def record_upload(self, file_size_bytes: int, duration_seconds: float) -> None:
+        if duration_seconds > 0.5 and file_size_bytes > 0:
+            measured = file_size_bytes / duration_seconds
+            # 70% weight on recent upload, 30% historical average
+            self.current_speed_bps = 0.7 * measured + 0.3 * self.current_speed_bps
+
+    def get_speed_bps(self) -> float:
+        return max(1024 * 100.0, self.current_speed_bps)
+
+upload_speed_estimator = UploadSpeedEstimator()
+
+async def run_estimated_upload_ticker(
+    tracker: "MessageProgressTracker",
+    file_size_bytes: int,
+    speed_estimator: UploadSpeedEstimator = upload_speed_estimator,
+    update_interval: float = 1.5,
+) -> None:
+    """Continuously updates status message with estimated upload percentage, speed, and ETA."""
+    start_time = time.monotonic()
+    size_mb = file_size_bytes / (1024 * 1024)
+    size_str = f"{size_mb:.2f}MiB"
+    speed_bps = speed_estimator.get_speed_bps()
+
+    initial_eta = int(file_size_bytes / speed_bps) if speed_bps > 0 else 0
+    initial_prog = DownloadProgress(
+        0.0,
+        eta=format_eta(initial_eta),
+        speed=format_speed(speed_bps),
+        size=size_str
+    )
+    await tracker.update(format_progress_bar("📤 Uploading to chat", initial_prog), force=True)
+
+    while True:
+        await asyncio.sleep(update_interval)
+        elapsed = time.monotonic() - start_time
+        speed_bps = speed_estimator.get_speed_bps()
+
+        est_bytes = elapsed * speed_bps
+        est_pct = min(98.0, (est_bytes / file_size_bytes) * 100.0) if file_size_bytes > 0 else 98.0
+        remaining_bytes = max(0, file_size_bytes - (est_pct / 100.0 * file_size_bytes))
+        eta_sec = int(remaining_bytes / speed_bps) if speed_bps > 0 else 0
+
+        prog = DownloadProgress(
+            est_pct,
+            eta=format_eta(eta_sec),
+            speed=format_speed(speed_bps),
+            size=size_str
+        )
+        await tracker.update(format_progress_bar("📤 Uploading to chat", prog))
+
 class ProgressFileReader(io.IOBase):
     """File wrapper that tracks bytes read and invokes a progress callback."""
 
