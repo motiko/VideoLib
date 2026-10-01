@@ -96,5 +96,32 @@ When tasked with implementing a feature (e.g., "Add a new feature"):
 ## 🌿 Git & Deployment Rules
 
 * **Never commit or push to `main` automatically**: Only run `git commit` or `git push` on `main` when explicitly requested by the user. Do not proactively commit or push code changes to `main` as part of autonomous task completion.
+  * **Exception (Releases)**: When the user explicitly requests to release a new version (e.g. "release a new version", "release vX.Y.Z"), the agent is authorized to commit the version bump directly to `main`, push to `origin main`, and push the release tag following the **Release Process** below.
 * **Never force push publicly pushed commits**: Do not rewrite history or force-push (`git push --force` / `--force-with-lease`) on branches that have already been pushed to the remote repository. Always create revert commits (`git revert`) instead.
+
+---
+
+## 🚀 Release Process
+
+When the user requests a release:
+1. **Determine Version**: Follow Semantic Versioning (SemVer):
+   * **Patch** (`vX.Y.Z+1`): Bug fixes, performance tweaks, or minor updates.
+   * **Minor** (`vX.Y+1.0`): New user-facing features, commands, or configuration additions.
+   * **Major** (`vX+1.0.0`): Breaking changes to commands, configuration, or API.
+2. **Update Version Strings**:
+   * `pyproject.toml`: Update `version = "X.Y.Z"` under `[project]`.
+   * `src/__init__.py`: Update `__version__ = "X.Y.Z"`.
+3. **Verify Locally**:
+   * Run `.venv/bin/python -m ruff check .` (must have 0 errors).
+   * Run `.venv/bin/pytest` (all tests must pass).
+4. **Commit & Push to `main`**:
+   * `git commit -am "chore(release): bump version to X.Y.Z"`
+   * `git push origin main`
+5. **Create & Push Git Tag**:
+   * `git tag -a vX.Y.Z -m "Release vX.Y.Z: <summary of changes>"`
+   * `git push origin vX.Y.Z`
+6. **Monitor Release Workflow**:
+   * Pushing the tag automatically triggers `.github/workflows/release.yml`.
+   * The workflow runs tests on macOS, publishes the GitHub Release with generated release notes, and updates the formula in `motiko/homebrew-videolib`.
+   * Track completion using `gh run list --workflow=release.yml` and `gh run watch <run_id> --exit-status`.
 
