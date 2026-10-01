@@ -108,8 +108,10 @@ async def test_orchestrator_download_error(mock_storage, mock_runner, orchestrat
     url = "https://youtube.com/watch?v=123"
     await orchestrator.handle_request("mock_platform", "12345", "101", url)
     
-    # Verify error message sent
-    assert any("Download error: File too large" in msg[2] for msg in mock_platform.edited_messages)
+    # Verify error message sent contains user-friendly message
+    assert any("too large" in msg[2].lower() or "File too large" in msg[2] for msg in mock_platform.edited_messages)
+    # Verify failure reaction was set
+    assert ("12345", "101", "👎") in mock_platform.reactions
     
     # Verify cleanup still ran
     mock_storage.cleanup.assert_called_once_with(temp_path)
@@ -171,4 +173,32 @@ async def test_orchestrator_progress_updates(mock_storage, mock_runner, orchestr
     assert mock_platform.sent_videos[0][2] == "Progress Title"
     # Check status message was deleted
     assert len(mock_platform.deleted_messages) == 1
+
+
+@pytest.mark.asyncio
+@patch("src.core.orchestrator.shell_runner")
+@patch("src.core.orchestrator.storage_manager")
+async def test_orchestrator_upload_error(mock_storage, mock_runner, orchestrator, mock_platform, tmp_path):
+    """Verify that upload errors are classified and reported with friendly messages."""
+    mock_runner.validate_url.return_value = True
+    mock_runner.extract_title = AsyncMock(return_value="Test Video")
+    temp_path = tmp_path / "video.mp4"
+    temp_path.write_bytes(b"A" * 1000)
+    mock_storage.generate_path.return_value = temp_path
+    mock_runner.download = AsyncMock(return_value=temp_path)
+    mock_storage.cleanup = AsyncMock(return_value=True)
+
+    # Mock send_video to raise a Telegram file-too-big error
+    async def failing_send_video(**kwargs):
+        raise Exception("telegram.error.BadRequest: File is too big")
+    mock_platform.send_video = failing_send_video
+
+    await orchestrator.handle_request("mock_platform", "12345", "101", "https://example.com/video")
+
+    # Should show user-friendly message, not raw exception
+    assert any("too large" in msg[2].lower() for msg in mock_platform.edited_messages)
+    # Should have failure reaction
+    assert ("12345", "101", "👎") in mock_platform.reactions
+    # Cleanup should still run
+    mock_storage.cleanup.assert_called_once_with(temp_path)
 
