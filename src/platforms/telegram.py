@@ -38,7 +38,7 @@ class TelegramPlatform(BasePlatform):
         # Start application
         await self.application.initialize()
         await self.application.start()
-        await self.application.updater.start_polling()
+        await self.application.updater.start_polling(drop_pending_updates=True)
         logger.info("TelegramPlatform: Bot polling started successfully.")
 
     async def stop(self) -> None:
