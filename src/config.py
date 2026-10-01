@@ -43,5 +43,34 @@ class Config:
     except ValueError:
         MAX_FILE_SIZE_MB = 50
 
+    # Database Path
+    DB_PATH: Path = Path(os.getenv("DB_PATH", "data/videolib.db")).resolve()
+
+    # Admin Telegram user IDs (comma-separated integers: "12345678,98765432")
+    ADMIN_USERS: set[int] = {
+        int(x.strip()) for x in os.getenv("ADMIN_USERS", "").split(",") if x.strip().isdigit()
+    }
+
+    # Access control & Rate limiting defaults
+    try:
+        DEFAULT_ALLOWLIST_DAILY_MB: int = int(os.getenv("DEFAULT_ALLOWLIST_DAILY_MB", "1000"))
+    except ValueError:
+        DEFAULT_ALLOWLIST_DAILY_MB = 1000
+
+    try:
+        DEFAULT_ALLOWLIST_DAILY_DOWNLOADS: int = int(os.getenv("DEFAULT_ALLOWLIST_DAILY_DOWNLOADS", "20"))
+    except ValueError:
+        DEFAULT_ALLOWLIST_DAILY_DOWNLOADS = 20
+
+    try:
+        DEFAULT_PUBLIC_DAILY_MB: int = int(os.getenv("DEFAULT_PUBLIC_DAILY_MB", "200"))
+    except ValueError:
+        DEFAULT_PUBLIC_DAILY_MB = 200
+
+    try:
+        DEFAULT_PUBLIC_DAILY_DOWNLOADS: int = int(os.getenv("DEFAULT_PUBLIC_DAILY_DOWNLOADS", "3"))
+    except ValueError:
+        DEFAULT_PUBLIC_DAILY_DOWNLOADS = 3
+
 # Global configuration instance
 config = Config()

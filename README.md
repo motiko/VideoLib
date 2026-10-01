@@ -238,6 +238,50 @@ brew services restart videolib
 
 ---
 
+## 🔒 Access Control & Tiered Daily Limits
+
+VideoLib includes built-in tiered access control and daily bandwidth/download quotas backed by SQLite persistence.
+
+* **Default Policy**: Only bot administrators and explicitly allowlisted users are permitted to download videos.
+* **Public Access**: Administrators can open access to everyone using `/publicaccess on`.
+* **Separate Limit Tiers**: Allowlisted users and public users ("the rest") have distinct, independently configurable daily quotas.
+
+### Configuration (`.env`)
+```ini
+# Comma-separated list of admin numeric Telegram User IDs
+ADMIN_USERS=12345678,98765432
+
+# Default daily limits for allowlisted users
+DEFAULT_ALLOWLIST_DAILY_MB=1000
+DEFAULT_ALLOWLIST_DAILY_DOWNLOADS=20
+
+# Default daily limits for all other users (active when public access is opened)
+DEFAULT_PUBLIC_DAILY_MB=200
+DEFAULT_PUBLIC_DAILY_DOWNLOADS=3
+
+# Path to SQLite database file
+DB_PATH=data/videolib.db
+```
+
+### Chat Commands
+
+#### For All Users
+* `/id`: Check your numeric Telegram User ID, username, and Chat ID.
+* `/mylimits` (aliases: `/limits`, `/quota`, `/usage`): Check your current daily downloads, bandwidth used, tier, and remaining quota.
+
+#### For Bot Administrators
+* `/publicaccess [on|off]` (alias: `/allowall`): Toggle open public access for all users on or off.
+* `/setlimit <allowlist|public> [mb=N] [dl=N]`: Set daily bandwidth or download limits for a tier (e.g. `/setlimit allowlist mb=1500 dl=25` or `/setlimit public mb=150 dl=2`). Run without arguments to view current limits for both tiers.
+* `/allow <@user | user_id>`: Grant allowlist access to a user (or reply to their message).
+* `/disallow <@user | user_id>`: Revoke a user's allowlist access.
+* `/allowed`: List all currently authorized allowlist users and their custom limits.
+* `/adjustlimits <@user | user_id> [mb=N] [dl=N] [reset]`: Assign individual custom VIP limits to a specific user (or `reset` to tier defaults).
+* `/showusage [@user | user_id]`: View detailed stats for a user, or overall bot traffic summary if no user is specified.
+* `/resetusage <@user | user_id>`: Reset a user's daily usage counters to zero.
+* `/adminhelp`: View the complete administrator command cheatsheet.
+
+---
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.

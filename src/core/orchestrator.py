@@ -35,7 +35,9 @@ class Orchestrator:
         platform.register_callback(self.handle_request)
         logger.info(f"Orchestrator: Registered platform adapter '{platform.name}'")
 
-    async def handle_request(self, platform_name: str, chat_id: str, message_id: str, url: str) -> None:
+    async def handle_request(
+        self, platform_name: str, chat_id: str, message_id: str, url: str, user_id: int | None = None
+    ) -> None:
         """Callback invoked by platform adapters when a download request is received."""
         platform = self.platforms.get(platform_name)
         if not platform:
@@ -157,6 +159,10 @@ class Orchestrator:
                     actual_speed = file_size_bytes / upload_duration
                 else:
                     actual_speed = upload_speed_estimator.get_speed_bps()
+
+                if user_id and file_size_bytes > 0:
+                    from src.core.access import access_manager
+                    access_manager.record_download(user_id, file_size_bytes)
 
                 # Complete status message at 100% if status message still exists
                 if status_msg_id and file_size_bytes > 0:

@@ -12,3 +12,5 @@ telegram-api-data/
 *.egg-info/
 dist/
 build/
+data/
+*.db
