@@ -8,3 +8,7 @@ __pycache__/
 *.log
 .pytest_cache/
 telegram-api-data/
+.venv/
+*.egg-info/
+dist/
+build/

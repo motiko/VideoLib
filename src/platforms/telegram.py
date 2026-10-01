@@ -13,7 +13,7 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 class TelegramPlatform(BasePlatform):
     """Platform adapter for Telegram using python-telegram-bot."""
-    
+
     def __init__(self, token: str):
         super().__init__("telegram")
         self.token = token
@@ -28,17 +28,17 @@ class TelegramPlatform(BasePlatform):
             # When using a local API server, we must also specify local_mode=True
             builder = builder.base_url(config.TELEGRAM_API_URL).local_mode(True)
         self.application = builder.build()
-        
+
         # Add basic commands
         self.application.add_handler(CommandHandler("start", self._handle_start))
         self.application.add_handler(CommandHandler("help", self._handle_help))
         self.application.add_handler(CommandHandler("debug_upload", self._handle_debug_upload))
-        
+
         # Add handler for general text messages containing URLs
         self.application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
         )
-        
+
         # Start application
         await self.application.initialize()
         await self.application.start()
@@ -134,7 +134,7 @@ class TelegramPlatform(BasePlatform):
                 message_id=int(message_id),
                 reaction=emoji
             )
-        except Exception as e:
+        except Exception:
             try:
                 # Fallback to standard thumbs-up if the custom emoji is not enabled in chat
                 return await self.application.bot.set_message_reaction(
@@ -157,7 +157,7 @@ class TelegramPlatform(BasePlatform):
         """Uploads and sends a video file to the Telegram chat."""
         if not self.application:
             raise RuntimeError("Telegram application is not running.")
-        
+
         # Open the file in binary read mode
         # python-telegram-bot/httpx handles async chunks internally
         try:
@@ -170,7 +170,7 @@ class TelegramPlatform(BasePlatform):
             }
             if reply_to_message_id:
                 kwargs["reply_to_message_id"] = int(reply_to_message_id)
-                
+
             total_size = file_path.stat().st_size if file_path.exists() else 0
             with open(file_path, "rb") as video_file:
                 if progress_callback and total_size > 0:
@@ -214,21 +214,21 @@ class TelegramPlatform(BasePlatform):
         text = update.message.text.strip()
         chat = update.effective_chat
         chat_id = str(chat.id)
-        
+
         from telegram.constants import ChatType
-        
+
         if chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
             bot_username = context.bot.username
             if not bot_username:
                 return # Can't check mention if username is unknown
-                
+
             mention = f"@{bot_username}"
-            
+
             # Use case-insensitive check since Telegram usernames are case-insensitive
             pattern = re.compile(re.escape(mention), re.IGNORECASE)
             if not pattern.search(text):
                 return # Ignore messages that don't mention the bot
-                
+
             # Treat the rest of the message as DM by removing the mention
             text = pattern.sub("", text).strip()
 
@@ -236,14 +236,14 @@ class TelegramPlatform(BasePlatform):
         if not match:
             # Inform user if they didn't send a link
             await self.send_message(
-                chat_id, 
+                chat_id,
                 "⚠️ Please send a message containing a valid HTTP/HTTPS link to a video."
             )
             return
 
         url = match.group(1).replace("\\", "")
         logger.info(f"TelegramPlatform: Found URL {url} from chat {chat_id}")
-        
+
         message_id = str(update.message.message_id)
 
         if self.message_callback:
@@ -259,7 +259,7 @@ class TelegramPlatform(BasePlatform):
         if not context.args:
             await self.send_message(chat_id, "⚠️ Please provide a file path to retry upload.")
             return
-        
+
         file_path = Path(" ".join(context.args))
         if not file_path.is_absolute():
             file_path = config.DOWNLOAD_DIR / file_path
@@ -267,7 +267,7 @@ class TelegramPlatform(BasePlatform):
         if not file_path.exists():
             await self.send_message(chat_id, f"⚠️ File not found: {file_path}")
             return
-            
+
         await self.send_message(chat_id, f"📤 Retrying upload for {file_path.name}...")
         try:
             await self.send_video(chat_id, file_path, caption=f"Debug upload: {file_path.name}")

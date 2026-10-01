@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.videolib.agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOMEBREW_PREFIX__/bin/videolib</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/VideoLib/videolib.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/VideoLib/videolib.stderr.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>VIDEOLIB_ENV_FILE</key>
+        <string>__HOME__/.config/videolib/.env</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/.config/videolib</string>
+</dict>
+</plist>

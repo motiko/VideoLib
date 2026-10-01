@@ -39,7 +39,7 @@ class DownloadError(Exception):
 
 class ShellRunner:
     """Safely executes download commands in async subprocesses using command-line array tokenization."""
-    
+
     def __init__(self, command_template: str, max_file_size_mb: int):
         self.command_template = command_template
         self.max_file_size_mb = max_file_size_mb
@@ -57,12 +57,12 @@ class ShellRunner:
                 return False
             if not parsed.netloc:
                 return False
-            
+
             # Strict safety whitelist: no spaces or shell characters
             illegal_chars = [";", "|", "$", "`", "<", ">", "\n", "\r", " "]
             if any(char in url for char in illegal_chars):
                 return False
-                
+
             return True
         except Exception:
             return False
@@ -116,7 +116,7 @@ class ShellRunner:
         """Tokenizes the command template and safely interpolates url and output path."""
         # Use shlex to safely split the template into arguments list
         raw_tokens = shlex.split(self.command_template)
-        
+
         interpolated_tokens = []
         for token in raw_tokens:
             # Replace placeholder variations (handles quotes if shlex didn't strip them)
@@ -129,7 +129,7 @@ class ShellRunner:
                 # Also clean up any lingering quote characters wrapped around placeholders
                 t = t.replace(f'"{val}"', val).replace(f"'{val}'", val)
             interpolated_tokens.append(t)
-            
+
         return interpolated_tokens
 
     async def _stream_process(
@@ -141,7 +141,6 @@ class ShellRunner:
         """Streams process output in real-time and calls progress_callback when download percentage is detected."""
         stdout_chunks: list[bytes] = []
         stderr_chunks: list[bytes] = []
-        progress_pattern = re.compile(r"\[download\]\s+([0-9.]+)%")
 
         async def read_stdout() -> None:
             if not process.stdout:
@@ -228,10 +227,10 @@ class ShellRunner:
 
         cmd_str = ' '.join(shlex.quote(arg) for arg in args)
         logger.info(f"ShellRunner: Launching command: {cmd_str}")
-        
+
         env = os.environ.copy()
         env["PYTHONWARNINGS"] = "ignore"
-        
+
         try:
             # Start subprocess using exec (list of arguments) to prevent shell injection
             process = await asyncio.create_subprocess_exec(

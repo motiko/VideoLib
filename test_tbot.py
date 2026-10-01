@@ -1,4 +1,3 @@
-import telegram
 from telegram.constants import ChatType
 
 print(ChatType.GROUP)
