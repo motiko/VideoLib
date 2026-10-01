@@ -2,7 +2,7 @@ import asyncio
 import io
 import pytest
 from pathlib import Path
-from src.utils.progress import ProgressFileReader, MessageProgressTracker, format_progress_bar
+from src.utils.progress import ProgressFileReader, MessageProgressTracker, format_progress_bar, DownloadProgress
 from src.platforms.base import BasePlatform
 
 class DummyPlatform(BasePlatform):
@@ -25,6 +25,14 @@ def test_format_progress_bar():
     assert "100%" in format_progress_bar("Downloading", 100.0)
     assert "█" in format_progress_bar("Downloading", 50.0)
     assert "░" in format_progress_bar("Downloading", 50.0)
+
+    # Test with DownloadProgress object containing ETA, speed, size
+    prog = DownloadProgress(45.5, eta="00:12", speed="3.45MiB/s", size="25.00MiB")
+    formatted = format_progress_bar("📥 Downloading video", prog)
+    assert "45.5%" in formatted
+    assert "ETA: 00:12" in formatted
+    assert "Speed: 3.45MiB/s" in formatted
+    assert "Size: 25.00MiB" in formatted
 
 @pytest.mark.asyncio
 async def test_progress_file_reader():

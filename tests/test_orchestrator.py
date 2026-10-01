@@ -109,19 +109,19 @@ async def test_orchestrator_invalid_url(mock_storage, mock_runner, orchestrator,
 @patch("src.core.orchestrator.shell_runner")
 @patch("src.core.orchestrator.storage_manager")
 async def test_orchestrator_progress_updates(mock_storage, mock_runner, orchestrator, mock_platform):
-    """Verify that progress callbacks update the reply message with percentage and progress bar."""
+    """Verify that progress callbacks update the reply message with percentage, progress bar, ETA, and speed."""
+    from src.utils.progress import DownloadProgress
     mock_runner.validate_url.return_value = True
     temp_path = Path("/tmp/downloads/video.mp4")
     mock_storage.generate_path.return_value = temp_path
 
     async def fake_download(url, output_path, progress_callback=None):
         if progress_callback:
-            await progress_callback(42.5)
+            prog = DownloadProgress(42.5, eta="00:05", speed="2.50MiB/s", size="15.00MiB")
+            await progress_callback(prog)
         return temp_path
 
-    async def fake_send_video(chat_id, file_path, caption=None, reply_to_message_id=None, progress_callback=None):
-        if progress_callback:
-            await progress_callback(78.0)
+    async def fake_send_video(chat_id, file_path, caption=None, reply_to_message_id=None, **kwargs):
         mock_platform.sent_videos.append((chat_id, file_path, caption, reply_to_message_id))
 
     mock_runner.download = AsyncMock(side_effect=fake_download)
@@ -134,6 +134,9 @@ async def test_orchestrator_progress_updates(mock_storage, mock_runner, orchestr
     # Check that edited messages contain progress info
     edited_texts = [msg[2] for msg in mock_platform.edited_messages]
     assert any("Downloading video" in t and "42.5%" in t for t in edited_texts)
+    assert any("ETA: 00:05" in t for t in edited_texts)
+    assert any("Speed: 2.50MiB/s" in t for t in edited_texts)
+    assert any("Size: 15.00MiB" in t for t in edited_texts)
     assert any("Uploading video" in t for t in edited_texts)
     assert any("Video sent!" in t for t in edited_texts)
 

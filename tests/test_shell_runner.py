@@ -134,6 +134,11 @@ async def test_download_with_progress_callback(mock_create_subprocess, tmp_path)
     assert 75.5 in received_progress
     assert 100.0 in received_progress
 
+    # Verify metadata fields are preserved on DownloadProgress
+    first = received_progress[0]
+    assert first.speed == "2.00MiB/s"
+    assert first.size == "~10.00MiB"
+
 @pytest.mark.asyncio
 async def test_real_subprocess_streaming(tmp_path):
     """Verify that real subprocess streaming reads progress and creates output file."""

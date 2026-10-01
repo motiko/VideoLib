@@ -7,6 +7,31 @@ from typing import Callable, Coroutine, Any
 from pathlib import Path
 from src.config import config
 from src.utils.logger import logger, save_failure_log
+from src.utils.progress import DownloadProgress
+
+_pct_pattern = re.compile(r"\[download\]\s+([0-9.]+)%")
+_size_pattern = re.compile(r"of\s+(~?\s*[0-9.]+\s*[KMGT]?i?B)")
+_speed_pattern = re.compile(r"at\s+([0-9.]+\s*[KMGT]?i?B/s)")
+_eta_pattern = re.compile(r"ETA\s+([0-9:]+)")
+
+def parse_yt_dlp_progress(line: str) -> DownloadProgress | None:
+    """Parses yt-dlp stdout lines to extract percentage, ETA, speed, and size."""
+    pct_m = _pct_pattern.search(line)
+    if not pct_m:
+        return None
+    try:
+        pct = float(pct_m.group(1))
+        size_m = _size_pattern.search(line)
+        speed_m = _speed_pattern.search(line)
+        eta_m = _eta_pattern.search(line)
+
+        size = re.sub(r"\s+", "", size_m.group(1)) if size_m else None
+        speed = re.sub(r"\s+", "", speed_m.group(1)) if speed_m else None
+        eta = eta_m.group(1) if eta_m else None
+
+        return DownloadProgress(pct, eta=eta, speed=speed, size=size)
+    except Exception:
+        return None
 
 class DownloadError(Exception):
     """Exception raised when a download task fails."""
@@ -94,22 +119,20 @@ class ShellRunner:
                         buffer = buffer[idx_n + 1:]
 
                     if progress_callback:
-                        m = progress_pattern.search(line)
-                        if m:
+                        progress_obj = parse_yt_dlp_progress(line)
+                        if progress_obj is not None:
                             try:
-                                pct = float(m.group(1))
-                                res = progress_callback(pct)
+                                res = progress_callback(progress_obj)
                                 if asyncio.iscoroutine(res):
                                     await res
                             except Exception:
                                 pass
 
             if buffer and progress_callback:
-                m = progress_pattern.search(buffer)
-                if m:
+                progress_obj = parse_yt_dlp_progress(buffer)
+                if progress_obj is not None:
                     try:
-                        pct = float(m.group(1))
-                        res = progress_callback(pct)
+                        res = progress_callback(progress_obj)
                         if asyncio.iscoroutine(res):
                             await res
                     except Exception:
@@ -191,13 +214,11 @@ class ShellRunner:
                 stdout_str = stdout.decode(errors="replace")
                 stderr_str = stderr.decode(errors="replace")
                 if progress_callback:
-                    progress_pattern = re.compile(r"\[download\]\s+([0-9.]+)%")
                     for line in stdout_str.replace("\r", "\n").splitlines():
-                        m = progress_pattern.search(line)
-                        if m:
+                        progress_obj = parse_yt_dlp_progress(line)
+                        if progress_obj is not None:
                             try:
-                                pct = float(m.group(1))
-                                res = progress_callback(pct)
+                                res = progress_callback(progress_obj)
                                 if asyncio.iscoroutine(res):
                                     await res
                             except Exception:

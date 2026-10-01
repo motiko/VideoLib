@@ -60,10 +60,6 @@ class Orchestrator:
                     text = format_progress_bar("📥 Downloading video", percent)
                     await tracker.update(text)
 
-                async def on_upload_progress(percent: float) -> None:
-                    text = format_progress_bar("📤 Uploading video", percent)
-                    await tracker.update(text)
-
                 # Generate a secure temporary path
                 file_path = storage_manager.generate_path(suffix=".mp4")
                 
@@ -74,23 +70,15 @@ class Orchestrator:
                     progress_callback=on_download_progress
                 )
                 
-                upload_start_status = format_progress_bar("📤 Uploading video", 0.0)
-                await tracker.update(upload_start_status, force=True)
+                await tracker.update("📤 Download complete. Uploading video to chat...", force=True)
                 
                 # Deliver the file
-                send_video_kwargs = {
-                    "chat_id": chat_id,
-                    "file_path": downloaded_file,
-                    "caption": "Here is your video!",
-                    "reply_to_message_id": message_id,
-                }
-                sig = inspect.signature(platform.send_video)
-                if "progress_callback" in sig.parameters or any(
-                    p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-                ):
-                    send_video_kwargs["progress_callback"] = on_upload_progress
-
-                await platform.send_video(**send_video_kwargs)
+                await platform.send_video(
+                    chat_id=chat_id,
+                    file_path=downloaded_file,
+                    caption="Here is your video!",
+                    reply_to_message_id=message_id,
+                )
                 
                 await tracker.update("✅ Video sent!", force=True)
                 

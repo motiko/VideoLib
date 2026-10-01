@@ -5,13 +5,57 @@ from typing import Callable, Coroutine, Any
 from src.platforms.base import BasePlatform
 from src.utils.logger import logger
 
-def format_progress_bar(action: str, percent: float) -> str:
-    """Formats a user-friendly progress status message with a progress bar and percentage."""
-    pct = max(0.0, min(100.0, percent))
+class DownloadProgress(float):
+    """Float representing percentage that also carries ETA, speed, and total size metadata."""
+
+    def __new__(
+        cls,
+        percent: float,
+        eta: str | None = None,
+        speed: str | None = None,
+        size: str | None = None,
+    ):
+        obj = super().__new__(cls, percent)
+        obj.percent = float(percent)
+        obj.eta = eta
+        obj.speed = speed
+        obj.size = size
+        return obj
+
+def format_progress_bar(
+    action: str,
+    percent: float,
+    eta: str | None = None,
+    speed: str | None = None,
+    size: str | None = None,
+) -> str:
+    """Formats a user-friendly progress status message with a progress bar, percentage, ETA, speed, and size."""
+    pct_val = float(percent)
+    pct = max(0.0, min(100.0, pct_val))
     filled = int(pct / 10)
     bar = "█" * filled + "░" * (10 - filled)
     pct_str = f"{pct:.1f}%" if pct < 99.95 else "100%"
-    return f"{action}... {pct_str} [{bar}]"
+
+    header = f"{action}... {pct_str} [{bar}]"
+
+    if eta is None:
+        eta = getattr(percent, "eta", None)
+    if speed is None:
+        speed = getattr(percent, "speed", None)
+    if size is None:
+        size = getattr(percent, "size", None)
+
+    details = []
+    if eta:
+        details.append(f"ETA: {eta}")
+    if speed:
+        details.append(f"Speed: {speed}")
+    if size:
+        details.append(f"Size: {size}")
+
+    if details:
+        return f"{header}\n{' | '.join(details)}"
+    return header
 
 class ProgressFileReader(io.IOBase):
     """File wrapper that tracks bytes read and invokes a progress callback."""
