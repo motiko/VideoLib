@@ -16,7 +16,7 @@ from telegram.constants import ChatType
 from telegram.ext import ContextTypes
 from src import __version__
 from src.config import config
-from src.core.access import access_manager
+from src.core.access import PENDING_RESTART_NOTIFY_KEY, access_manager
 from src.utils.logger import logger
 from src.utils.logs import (
     app_log_path,
@@ -34,10 +34,11 @@ from src.utils.system import (
     get_ytdlp_version,
     update_ytdlp,
 )
+from src.utils.updater import detect_install, fetch_latest_version, is_newer, run_upgrade
 
 ADMIN_DENIED = "⛔ This command is restricted to bot administrators."
 PRIVATE_ONLY = "🔒 This command exposes logs or user data, so it only works in a private chat with the bot."
-RESTART_NOTIFY_KEY = "pending_restart_notify"
+RESTART_NOTIFY_KEY = PENDING_RESTART_NOTIFY_KEY
 BROADCAST_TTL_SEC = 120.0
 MAX_LOG_LINES = 200
 
@@ -65,6 +66,12 @@ def _user_label(row: dict[str, Any]) -> str:
     if row.get("first_name"):
         return _esc(row["first_name"])
     return f"ID {row.get('user_id')}"
+
+
+def _auto_update_label() -> str:
+    if not config.AUTO_UPDATE:
+        return "off"
+    return f"on (checks every {config.AUTO_UPDATE_CHECK_HOURS:g}h)"
 
 
 def _fmt_ts(iso: str | None) -> str:
@@ -185,6 +192,7 @@ class TelegramAdminOpsMixin:
             f"<b>Temp files:</b> {tmp_count} ({format_bytes(tmp_bytes)})\n"
             f"• <b>Log size:</b> {format_bytes(log_size)} · <b>DB size:</b> {format_bytes(db_size)}\n"
             f"• <b>Public access:</b> {pub}\n"
+            f"• <b>Auto-update:</b> {_auto_update_label()}\n"
             f"• <b>Today:</b> {stats['total_downloads']} downloads, {stats['total_mb']:.1f} MB, "
             f"{stats['active_users']} active users\n"
         )
@@ -416,7 +424,7 @@ class TelegramAdminOpsMixin:
         await self.send_message(chat_id, "\n".join(lines))
 
     # ------------------------------------------------------------------
-    # /restart /ytdlp /broadcast /debug_upload
+    # /restart /ytdlp /update /broadcast /debug_upload
     # ------------------------------------------------------------------
 
     async def _handle_restart(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -460,6 +468,80 @@ class TelegramAdminOpsMixin:
             + f"\n• Version now: <code>{_esc(version)}</code>\n"
             + render_pre(tail or "(no output)", max_chars=3000)
         )
+        if msg_id:
+            await self.edit_message(chat_id, msg_id, text)
+        else:
+            await self.send_message(chat_id, text)
+
+    async def _handle_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Admin: /update checks GitHub for a newer release; /update now [force] upgrades the package and restarts."""
+        chat_id = await self._deny_unless_admin(update)
+        if not chat_id:
+            return
+        args = [a.lower() for a in (context.args or [])]
+        sub = args[0] if args else "check"
+        if sub not in ("check", "now"):
+            await self.send_message(chat_id, "⚠️ Usage: <code>/update</code> to check, <code>/update now [force]</code> to upgrade and restart.")
+            return
+
+        info = detect_install()
+        install_line = f"• <b>Install:</b> {_esc(info.label)}\n• <b>Auto-update:</b> {_esc(_auto_update_label())}"
+
+        if sub == "check":
+            msg_id = await self.send_message(chat_id, "🔎 Checking for updates…")
+            latest = await fetch_latest_version()
+            if latest is None:
+                text = f"⚠️ Could not look up the latest release of <code>{_esc(config.UPDATE_REPO)}</code>.\n{install_line}"
+            elif is_newer(latest, __version__):
+                text = (
+                    f"⬆️ <b>Update available:</b> <code>{_esc(__version__)}</code> → <code>{_esc(latest)}</code>\n"
+                    f"{install_line}\nRun <code>/update now</code> to upgrade and restart."
+                )
+            else:
+                text = f"✅ <b>Up to date</b> (running <code>{_esc(__version__)}</code>, latest release <code>{_esc(latest)}</code>).\n{install_line}"
+            await self._edit_or_send(chat_id, msg_id, text)
+            return
+
+        orch = self.orchestrator
+        if not orch:
+            await self.send_message(chat_id, "⚠️ Orchestrator not attached; cannot update.")
+            return
+        force = "force" in args
+        n_active = len(orch.active)
+        if n_active and not force:
+            await self.send_message(
+                chat_id,
+                f"⚠️ {n_active} download(s) in progress. Use <code>/update now force</code> to update anyway (they will fail on restart).",
+            )
+            return
+
+        latest = await fetch_latest_version()
+        if latest is None:
+            await self.send_message(chat_id, f"❌ Could not look up the latest release of <code>{_esc(config.UPDATE_REPO)}</code>; not updating.")
+            return
+        if not is_newer(latest, __version__) and not force:
+            await self.send_message(
+                chat_id,
+                f"✅ Already up to date (<code>{_esc(__version__)}</code>). Use <code>/update now force</code> to reinstall anyway.",
+            )
+            return
+
+        msg_id = await self.send_message(
+            chat_id, f"⏳ Updating <code>{_esc(__version__)}</code> → <code>{_esc(latest)}</code> via {_esc(info.label)}… this can take a few minutes."
+        )
+        logger.info(f"TelegramPlatform: Update to {latest} requested by admin in chat {chat_id} (force={force}).")
+        ok, output = await run_upgrade(info, latest)
+        tail = "\n".join(output.strip().splitlines()[-15:])
+        if not ok:
+            await self._edit_or_send(chat_id, msg_id, "❌ <b>Update failed.</b> The running version is unchanged.\n" + render_pre(tail or "(no output)", max_chars=3000))
+            return
+        await self._edit_or_send(
+            chat_id, msg_id, f"✅ <b>Update to {_esc(latest)} installed.</b> Restarting… I'll message you here when I'm back.\n" + render_pre(tail or "(no output)", max_chars=2000)
+        )
+        access_manager.set_setting(RESTART_NOTIFY_KEY, chat_id)
+        orch.request_shutdown(restart=True)
+
+    async def _edit_or_send(self, chat_id: str, msg_id: str | None, text: str) -> None:
         if msg_id:
             await self.edit_message(chat_id, msg_id, text)
         else:

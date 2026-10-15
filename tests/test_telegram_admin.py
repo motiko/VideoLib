@@ -62,6 +62,7 @@ def sent(platform) -> str:
     ("_handle_history", "/history"),
     ("_handle_restart", "/restart"),
     ("_handle_ytdlp", "/ytdlp"),
+    ("_handle_update", "/update"),
     ("_handle_broadcast", "/broadcast hi"),
     ("_handle_debug_upload", "/debug_upload x.mp4"),
 ])
@@ -298,7 +299,7 @@ async def test_debug_upload_confined_to_download_dir(platform, tmp_path):
 async def test_adminhelp_lists_ops(platform):
     await platform._handle_adminhelp(*admin_update("/adminhelp"))
     msg = sent(platform)
-    for cmd in ("/uptime", "/status", "/queue", "/logs", "/stats", "/history", "/restart", "/ytdlp", "/broadcast"):
+    for cmd in ("/uptime", "/status", "/queue", "/logs", "/stats", "/history", "/restart", "/ytdlp", "/update", "/broadcast"):
         assert cmd in msg
 
 
@@ -333,3 +334,94 @@ async def test_data_exposing_commands_refused_in_groups(platform, handler, text)
     update.effective_chat.id = -100123
     await getattr(platform, handler)(update, context)
     assert platform.send_message.call_args[0] == ("-100123", admin_mod.PRIVATE_ONLY)
+
+
+# ---------------------------------------------------------------------------
+# /update
+# ---------------------------------------------------------------------------
+
+def _install():
+    from src.utils.updater import InstallInfo
+    return InstallInfo(kind="brew", label="Homebrew", env={}, _commands=[["brew", "upgrade", "videolib"]])
+
+
+@pytest.mark.asyncio
+async def test_update_requires_admin(platform):
+    await platform._handle_update(*make_update(user_id=1, text="/update"))
+    assert sent(platform) == DENIED
+
+
+@pytest.mark.asyncio
+async def test_update_check_reports_available_and_current(platform):
+    with patch.object(admin_mod, "detect_install", _install), \
+         patch.object(admin_mod, "fetch_latest_version", AsyncMock(return_value="99.0.0")):
+        await platform._handle_update(*admin_update("/update"))
+    final = platform.edit_message.call_args[0][2]
+    assert "99.0.0" in final and "/update now" in final and "Homebrew" in final
+    assert not platform.orchestrator.shutdown_event.is_set()
+
+    with patch.object(admin_mod, "detect_install", _install), \
+         patch.object(admin_mod, "fetch_latest_version", AsyncMock(return_value="0.0.1")):
+        await platform._handle_update(*admin_update("/update check"))
+    assert "Up to date" in platform.edit_message.call_args[0][2]
+
+    with patch.object(admin_mod, "detect_install", _install), \
+         patch.object(admin_mod, "fetch_latest_version", AsyncMock(return_value=None)):
+        await platform._handle_update(*admin_update("/update"))
+    assert "Could not look up" in platform.edit_message.call_args[0][2]
+
+
+@pytest.mark.asyncio
+async def test_update_now_upgrades_and_restarts(platform, mgr):
+    with patch.object(admin_mod, "detect_install", _install), \
+         patch.object(admin_mod, "fetch_latest_version", AsyncMock(return_value="99.0.0")), \
+         patch.object(admin_mod, "run_upgrade", AsyncMock(return_value=(True, "==> Upgrading videolib"))) as run:
+        await platform._handle_update(*admin_update("/update now"))
+    run.assert_awaited_once()
+    assert run.await_args[0][1] == "99.0.0"
+    final = platform.edit_message.call_args[0][2]
+    assert "installed" in final and "Restarting" in final
+    orch = platform.orchestrator
+    assert orch.shutdown_event.is_set() and orch.restart_requested
+    assert mgr.get_setting("pending_restart_notify") == str(ADMIN_ID)
+
+
+@pytest.mark.asyncio
+async def test_update_now_failure_does_not_restart(platform):
+    with patch.object(admin_mod, "detect_install", _install), \
+         patch.object(admin_mod, "fetch_latest_version", AsyncMock(return_value="99.0.0")), \
+         patch.object(admin_mod, "run_upgrade", AsyncMock(return_value=(False, "Error: no bottle"))):
+        await platform._handle_update(*admin_update("/update now"))
+    final = platform.edit_message.call_args[0][2]
+    assert "failed" in final.lower() and "no bottle" in final
+    assert not platform.orchestrator.shutdown_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_update_now_refuses_when_busy_or_current_unless_forced(platform):
+    orch = platform.orchestrator
+    orch.active["k"] = ActiveDownload("telegram", "1", "1", "https://x.com/1")
+    with patch.object(admin_mod, "detect_install", _install), \
+         patch.object(admin_mod, "fetch_latest_version", AsyncMock(return_value="99.0.0")) as fetch:
+        await platform._handle_update(*admin_update("/update now"))
+    fetch.assert_not_awaited()
+    assert "force" in sent(platform) and not orch.shutdown_event.is_set()
+    orch.active.clear()
+
+    with patch.object(admin_mod, "detect_install", _install), \
+         patch.object(admin_mod, "fetch_latest_version", AsyncMock(return_value="0.0.1")), \
+         patch.object(admin_mod, "run_upgrade", AsyncMock()) as run:
+        await platform._handle_update(*admin_update("/update now"))
+        run.assert_not_awaited()
+        assert "Already up to date" in sent(platform)
+
+        run.return_value = (True, "reinstalled")
+        await platform._handle_update(*admin_update("/update now force"))
+        run.assert_awaited_once()
+    assert orch.restart_requested
+
+
+@pytest.mark.asyncio
+async def test_update_usage_on_unknown_subcommand(platform):
+    await platform._handle_update(*admin_update("/update banana"))
+    assert "Usage" in sent(platform)

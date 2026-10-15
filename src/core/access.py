@@ -10,6 +10,10 @@ from typing import Any, Generator
 from src.config import config
 
 
+# Settings key holding the chat to notify once the bot is back after /restart or a self-update
+PENDING_RESTART_NOTIFY_KEY = "pending_restart_notify"
+
+
 class AccessManager:
     """Manages bot user authorization, whitelist status, tiered limits, and daily quota consumption."""
 

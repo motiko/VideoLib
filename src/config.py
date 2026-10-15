@@ -46,6 +46,14 @@ class Config:
     # Store full URLs and titles in download history (default: domain only)
     STORE_FULL_URLS: bool = _parse_bool(os.getenv("STORE_FULL_URLS"), False)
 
+    # Self-update: AUTO_UPDATE checks GitHub releases every AUTO_UPDATE_CHECK_HOURS and upgrades when idle
+    AUTO_UPDATE: bool = _parse_bool(os.getenv("AUTO_UPDATE"), False)
+    try:
+        AUTO_UPDATE_CHECK_HOURS: float = float(os.getenv("AUTO_UPDATE_CHECK_HOURS", "6"))
+    except ValueError:
+        AUTO_UPDATE_CHECK_HOURS = 6.0
+    UPDATE_REPO: str = os.getenv("UPDATE_REPO", "motiko/VideoLib")
+
     # Database Path
     DB_PATH: Path = Path(os.getenv("DB_PATH", "data/videolib.db")).resolve()
 

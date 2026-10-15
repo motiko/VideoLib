@@ -295,11 +295,16 @@ DB_PATH=data/videolib.db
 * `/stats [days]`: Overview for the last N days (default 7). Sub-commands: `/stats top_users [days] [n]`, `/stats sites [days] [n]`, `/stats daily [days]`, `/stats errors [days] [n]`.
 * `/history [@user | user_id] [n]`: Recent downloads, optionally for one user (or reply to their message). Numbers below 1000 are treated as the row count.
 * `/ytdlp [version|update]`: Show the yt-dlp version or update it (self-updater, falling back to Homebrew or pip).
+* `/update`: Check GitHub for a newer VideoLib release. `/update now [force]` installs it (Homebrew `brew upgrade`, `git pull` for a source checkout, or pip from the release tarball) and restarts the bot; it refuses while downloads are active unless `force`.
 * `/broadcast <text>`: Preview a message to every user who has messaged the bot; `/broadcast confirm` sends it, `/broadcast cancel` discards it.
 * `/restart [force]`: Gracefully stop and re-exec the bot (refuses while downloads are active unless `force`). The requesting chat gets a "back online" message afterwards.
 * `/debug_upload <file>`: Re-send a file from `DOWNLOAD_DIR` as a video (admin only; paths outside the download directory are refused).
 
 Download history (used by `/stats` and `/history`) stores only the site domain by default. Set `STORE_FULL_URLS=true` to also keep full URLs and titles.
+
+##### Automatic updates
+
+Set `AUTO_UPDATE=true` to have the bot check GitHub releases every `AUTO_UPDATE_CHECK_HOURS` (default 6). When a newer release exists and no downloads are running, it upgrades itself using the same method as `/update now`, messages every admin, and restarts. A failed upgrade is reported once per release and not retried until a newer one appears (or an admin runs `/update now`). `UPDATE_REPO` (default `motiko/VideoLib`) selects the GitHub repository whose releases are followed.
 
 ---
 
