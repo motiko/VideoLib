@@ -288,6 +288,7 @@ DB_PATH=data/videolib.db
 * `/status`: Health overview: uptime, version, yt-dlp version, running/queued downloads, disk free, temp files, log/DB size, public access, today's totals.
 * `/uptime`: Uptime, PID, and version.
 * `/queue` (alias: `/active`): Downloads currently in progress (stage, elapsed time, user).
+* `/logs`, `/stats`, `/history`, and `/queue` only work in a private chat with the bot, so logs and user data are never posted into a group.
 * `/logs [tail] [n]` / `/logs errors [n]`: Last `n` log lines (default 30, max 200) or only warnings/errors.
 * `/logs upload`: Send the current `videolib.log` as a file.
 * `/logs failures [n]` / `/logs failure <name|latest>`: List or send yt-dlp failure reports from `LOG_DIR/failures`.

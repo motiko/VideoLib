@@ -318,3 +318,18 @@ def test_parse_days_and_limit():
     assert admin_mod._parse_days_limit(["30", "3"], 7, 10) == (30, 3)
     assert admin_mod._parse_days_limit(["x", "0"], 7, 10) == (7, 10)
     assert admin_mod._parse_days_limit(["9999"], 7, 10) == (365, 10)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler,text", [
+    ("_handle_queue", "/queue"),
+    ("_handle_logs", "/logs"),
+    ("_handle_stats", "/stats"),
+    ("_handle_history", "/history"),
+])
+async def test_data_exposing_commands_refused_in_groups(platform, handler, text):
+    update, context = admin_update(text)
+    update.effective_chat.type = "supergroup"
+    update.effective_chat.id = -100123
+    await getattr(platform, handler)(update, context)
+    assert platform.send_message.call_args[0] == ("-100123", admin_mod.PRIVATE_ONLY)

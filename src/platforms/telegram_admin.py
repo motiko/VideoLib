@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from telegram import Update
+from telegram.constants import ChatType
 from telegram.ext import ContextTypes
 from src import __version__
 from src.config import config
@@ -35,6 +36,7 @@ from src.utils.system import (
 )
 
 ADMIN_DENIED = "⛔ This command is restricted to bot administrators."
+PRIVATE_ONLY = "🔒 This command exposes logs or user data, so it only works in a private chat with the bot."
 RESTART_NOTIFY_KEY = "pending_restart_notify"
 BROADCAST_TTL_SEC = 120.0
 MAX_LOG_LINES = 200
@@ -108,12 +110,17 @@ class TelegramAdminOpsMixin:
             self._pending_broadcasts_store = store
         return store
 
-    async def _deny_unless_admin(self, update: Update) -> str | None:
-        """Returns chat_id when the sender is an admin; otherwise replies with the denial and returns None."""
+    async def _deny_unless_admin(self, update: Update, private_only: bool = False) -> str | None:
+        """Returns chat_id when the sender is an admin (and, if private_only, the chat is a DM); else replies and returns None."""
         chat_id = str(update.effective_chat.id)
         if not self._require_admin(update):
             await self.send_message(chat_id, ADMIN_DENIED)
             return None
+        if private_only:
+            chat = update.effective_chat
+            if chat is None or chat.type != ChatType.PRIVATE:
+                await self.send_message(chat_id, PRIVATE_ONLY)
+                return None
         return chat_id
 
     def _uptime_line(self) -> str:
@@ -185,7 +192,7 @@ class TelegramAdminOpsMixin:
 
     async def _handle_queue(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Admin: list in-flight downloads."""
-        chat_id = await self._deny_unless_admin(update)
+        chat_id = await self._deny_unless_admin(update, private_only=True)
         if not chat_id:
             return
         orch = self.orchestrator
@@ -206,7 +213,7 @@ class TelegramAdminOpsMixin:
 
     async def _handle_logs(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Admin: /logs [tail|errors] [n] | upload | failures [n] | failure <name|latest>."""
-        chat_id = await self._deny_unless_admin(update)
+        chat_id = await self._deny_unless_admin(update, private_only=True)
         if not chat_id:
             return
         args = list(context.args or [])
@@ -277,7 +284,7 @@ class TelegramAdminOpsMixin:
 
     async def _handle_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Admin: /stats [days] | top_users|sites|daily|errors [days] [n]."""
-        chat_id = await self._deny_unless_admin(update)
+        chat_id = await self._deny_unless_admin(update, private_only=True)
         if not chat_id:
             return
         args = list(context.args or [])
@@ -368,7 +375,7 @@ class TelegramAdminOpsMixin:
 
     async def _handle_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Admin: /history [@user | id] [n] — numeric args below 1000 are treated as the row count."""
-        chat_id = await self._deny_unless_admin(update)
+        chat_id = await self._deny_unless_admin(update, private_only=True)
         if not chat_id:
             return
         args = list(context.args or [])
