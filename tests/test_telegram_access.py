@@ -263,3 +263,38 @@ async def test_group_member_download_permission(telegram_platform):
     await platform._handle_message(update, context)
     assert callback_mock.call_count == 1
 
+
+
+@pytest.mark.asyncio
+async def test_debug_upload_requires_admin(telegram_platform):
+    platform, mgr = telegram_platform
+    platform.send_video = AsyncMock()
+    update, context = make_update(user_id=7777, username="not_admin", text="/debug_upload /etc/passwd")
+    await platform._handle_debug_upload(update, context)
+    platform.send_message.assert_called_with("7777", "⛔ This command is restricted to bot administrators.")
+    platform.send_video.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_debug_upload_confined_to_download_dir(telegram_platform, tmp_path):
+    from src.platforms import telegram as tg_mod
+    platform, mgr = telegram_platform
+    platform.send_video = AsyncMock()
+    dl_dir = tmp_path / "downloads"
+    dl_dir.mkdir()
+    secret = tmp_path / ".env"
+    secret.write_text("TELEGRAM_BOT_TOKEN=x")
+    clip = dl_dir / "clip.mp4"
+    clip.write_bytes(b"0")
+
+    with patch.object(tg_mod.config, "ADMIN_USERS", {4242}), patch.object(tg_mod.config, "DOWNLOAD_DIR", dl_dir):
+        for bad in (str(secret), "../.env"):
+            update, context = make_update(user_id=4242, username="boss", text=f"/debug_upload {bad}")
+            await platform._handle_debug_upload(update, context)
+            assert "Only files inside" in platform.send_message.call_args[0][1]
+        platform.send_video.assert_not_called()
+
+        update, context = make_update(user_id=4242, username="boss", text="/debug_upload clip.mp4")
+        await platform._handle_debug_upload(update, context)
+        platform.send_video.assert_called_once()
+        assert platform.send_video.call_args[0][1] == clip

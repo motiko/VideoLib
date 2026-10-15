@@ -826,18 +826,29 @@ class TelegramPlatform(BasePlatform):
             logger.warning("TelegramPlatform: Message received, but no callback registered.")
 
     async def _handle_debug_upload(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Replies to the /debug_upload command."""
+        """Admin command to re-send a file from DOWNLOAD_DIR: /debug_upload <file>. Paths outside it are refused."""
         chat_id = str(update.effective_chat.id)
+        if not self._require_admin(update):
+            await self.send_message(chat_id, "⛔ This command is restricted to bot administrators.")
+            return
+
         if not context.args:
-            await self.send_message(chat_id, "⚠️ Please provide a file path to retry upload.")
+            await self.send_message(chat_id, "⚠️ Please provide a file name inside the download directory to retry upload.")
             return
 
         file_path = Path(" ".join(context.args))
         if not file_path.is_absolute():
             file_path = config.DOWNLOAD_DIR / file_path
 
-        if not file_path.exists():
-            await self.send_message(chat_id, f"⚠️ File not found: {file_path}")
+        # Confine to the download directory (blocks absolute paths and ".." traversal)
+        try:
+            file_path.resolve().relative_to(config.DOWNLOAD_DIR.resolve())
+        except ValueError:
+            await self.send_message(chat_id, "⛔ Only files inside the download directory can be uploaded.")
+            return
+
+        if not file_path.is_file():
+            await self.send_message(chat_id, f"⚠️ File not found: {file_path.name}")
             return
 
         await self.send_message(chat_id, f"📤 Retrying upload for {file_path.name}...")
