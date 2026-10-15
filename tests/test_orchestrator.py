@@ -38,6 +38,14 @@ class MockPlatform(BasePlatform):
     async def send_video(self, chat_id: str, file_path: Path, caption: str | None = None, reply_to_message_id: str | None = None, **kwargs) -> None:
         self.sent_videos.append((chat_id, file_path, caption, reply_to_message_id))
 
+@pytest.fixture(autouse=True)
+def isolated_access_manager(tmp_path):
+    """Route history/quota writes to a throwaway DB so tests never touch the real one."""
+    from src.core.access import AccessManager
+    mgr = AccessManager(db_path=tmp_path / "orch_test.db")
+    with patch("src.core.orchestrator.access_manager", mgr):
+        yield mgr
+
 @pytest.fixture
 def orchestrator():
     return Orchestrator()
@@ -200,3 +208,69 @@ async def test_orchestrator_upload_error(mock_storage, mock_runner, orchestrator
     # Cleanup should still run
     mock_storage.cleanup.assert_called_once_with(temp_path)
 
+
+
+@pytest.mark.asyncio
+@patch("src.core.orchestrator.shell_runner")
+@patch("src.core.orchestrator.storage_manager")
+async def test_orchestrator_tracks_active_and_records_history_on_success(
+    mock_storage, mock_runner, orchestrator, mock_platform, isolated_access_manager, tmp_path
+):
+    mock_runner.validate_url.return_value = True
+    mock_runner.extract_title = AsyncMock(return_value="Title")
+    real_file = tmp_path / "video.mp4"
+    real_file.write_bytes(b"x" * 2048)
+    mock_storage.generate_path.return_value = real_file
+    mock_storage.cleanup = AsyncMock(return_value=True)
+
+    seen_active = {}
+
+    async def fake_download(url, path, progress_callback=None):
+        seen_active.update({k: (v.user_id, v.stage, v.title) for k, v in orchestrator.active.items()})
+        return real_file
+
+    mock_runner.download = AsyncMock(side_effect=fake_download)
+
+    assert mock_platform.orchestrator is orchestrator
+    await orchestrator.handle_request("mock_platform", "12345", "101", "https://youtube.com/watch?v=1", user_id=77)
+
+    assert len(seen_active) == 1
+    assert next(iter(seen_active.values())) == (77, "downloading", "Title")
+    assert orchestrator.active == {}
+
+    rows = isolated_access_manager.get_recent_downloads(limit=5)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "ok"
+    assert rows[0]["domain"] == "youtube.com"
+    assert rows[0]["size_bytes"] == 2048
+    assert rows[0]["user_id"] == 77
+
+
+@pytest.mark.asyncio
+@patch("src.core.orchestrator.shell_runner")
+@patch("src.core.orchestrator.storage_manager")
+async def test_orchestrator_records_history_on_failure(
+    mock_storage, mock_runner, orchestrator, mock_platform, isolated_access_manager
+):
+    mock_runner.validate_url.return_value = True
+    mock_storage.generate_path.return_value = Path("/tmp/downloads/video.mp4")
+    mock_runner.download = AsyncMock(side_effect=DownloadError("Video unavailable"))
+    mock_storage.cleanup = AsyncMock(return_value=True)
+
+    await orchestrator.handle_request("mock_platform", "12345", "101", "https://vimeo.com/9", user_id=5)
+
+    assert orchestrator.active == {}
+    rows = isolated_access_manager.get_recent_downloads(limit=5)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "failed"
+    assert "Video unavailable" in rows[0]["error"]
+
+
+def test_orchestrator_uptime_and_shutdown_request(orchestrator):
+    assert orchestrator.uptime_seconds() >= 0
+    assert orchestrator.started_at.tzinfo is not None
+    assert not orchestrator.shutdown_event.is_set()
+    assert orchestrator.restart_requested is False
+    orchestrator.request_shutdown(restart=True)
+    assert orchestrator.shutdown_event.is_set()
+    assert orchestrator.restart_requested is True

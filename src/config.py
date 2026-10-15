@@ -43,6 +43,9 @@ class Config:
     except ValueError:
         MAX_FILE_SIZE_MB = 50
 
+    # Store full URLs and titles in download history (default: domain only)
+    STORE_FULL_URLS: bool = _parse_bool(os.getenv("STORE_FULL_URLS"), False)
+
     # Database Path
     DB_PATH: Path = Path(os.getenv("DB_PATH", "data/videolib.db")).resolve()
 

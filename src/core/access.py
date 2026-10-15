@@ -3,7 +3,8 @@
 import contextlib
 import sqlite3
 import threading
-from datetime import datetime, timezone
+import urllib.parse
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Generator
 from src.config import config
@@ -86,6 +87,27 @@ class AccessManager:
                 """
             )
 
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS downloads (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    chat_id INTEGER,
+                    domain TEXT,
+                    url TEXT,
+                    title TEXT,
+                    size_bytes INTEGER DEFAULT 0,
+                    duration_sec REAL DEFAULT 0,
+                    status TEXT,
+                    error TEXT,
+                    created_at TEXT
+                )
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_downloads_created_at ON downloads(created_at)"
+            )
+
             # Seed default tiered settings if not present
             defaults = {
                 "public_access_enabled": "0",  # Disabled by default: only admins & allowlist can download
@@ -105,6 +127,55 @@ class AccessManager:
     def _today_utc() -> str:
         """Returns today's date in YYYY-MM-DD UTC format."""
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _since_utc(days: int) -> str:
+        """Returns the ISO timestamp marking the start (00:00 UTC) of the window covering the last `days` days."""
+        days = max(1, int(days))
+        start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+        return start.isoformat()
+
+    @staticmethod
+    def extract_domain(url: str) -> str:
+        """Extracts a normalized hostname (no leading www./m.) from a URL; returns 'unknown' on failure."""
+        try:
+            host = (urllib.parse.urlparse(url).hostname or "").lower()
+        except Exception:
+            host = ""
+        for prefix in ("www.", "m."):
+            if host.startswith(prefix):
+                host = host[len(prefix):]
+        return host or "unknown"
+
+    # ------------------------------------------------------------------
+    # Generic settings helpers
+    # ------------------------------------------------------------------
+
+    def get_setting(self, key: str) -> str | None:
+        """Returns a raw bot_settings value, or None if unset."""
+        with self._lock, self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM bot_settings WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Upserts a raw bot_settings value."""
+        with self._lock, self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO bot_settings (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, value),
+            )
+            conn.commit()
+
+    def delete_setting(self, key: str) -> None:
+        """Removes a bot_settings key."""
+        with self._lock, self._get_connection() as conn:
+            conn.execute("DELETE FROM bot_settings WHERE key = ?", (key,))
+            conn.commit()
 
     def record_user(self, user_id: int, username: str | None, first_name: str | None) -> None:
         """Records or updates user profile metadata from incoming messages."""
@@ -531,6 +602,190 @@ class AccessManager:
                 "allowlist_daily_downloads": al_dl,
                 "public_daily_mb": pub_mb,
                 "public_daily_downloads": pub_dl,
+            }
+
+    def get_all_users(self) -> list[dict[str, Any]]:
+        """Returns every user that has ever interacted with the bot."""
+        with self._lock, self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT user_id, username, first_name, is_allowed, is_admin FROM users ORDER BY user_id ASC"
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    # ------------------------------------------------------------------
+    # Download history & statistics
+    # ------------------------------------------------------------------
+
+    def record_download_event(
+        self,
+        user_id: int | None,
+        chat_id: int | str | None,
+        url: str,
+        title: str | None,
+        size_bytes: int,
+        duration_sec: float,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        """Appends a row to the download history. URL/title are stored only when STORE_FULL_URLS is enabled."""
+        domain = self.extract_domain(url)
+        store_full = bool(config.STORE_FULL_URLS)
+        try:
+            chat_val: int | None = int(chat_id) if chat_id is not None else None
+        except (TypeError, ValueError):
+            chat_val = None
+        err = (error or "")[:200] or None
+        now_str = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO downloads
+                    (user_id, chat_id, domain, url, title, size_bytes, duration_sec, status, error, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    chat_val,
+                    domain,
+                    url if store_full else None,
+                    title if store_full else None,
+                    int(size_bytes or 0),
+                    float(duration_sec or 0.0),
+                    status,
+                    err,
+                    now_str,
+                ),
+            )
+            conn.commit()
+
+    def get_top_users(self, days: int = 7, limit: int = 10) -> list[dict[str, Any]]:
+        """Top users by download count over the last `days` days (from usage_daily)."""
+        since_date = self._since_utc(days)[:10]
+        with self._lock, self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT ud.user_id,
+                       u.username,
+                       u.first_name,
+                       coalesce(sum(ud.downloads_count), 0) AS downloads,
+                       coalesce(sum(ud.bytes_downloaded), 0) AS bytes
+                FROM usage_daily ud
+                LEFT JOIN users u ON u.user_id = ud.user_id
+                WHERE ud.date >= ?
+                GROUP BY ud.user_id
+                ORDER BY downloads DESC, bytes DESC
+                LIMIT ?
+                """,
+                (since_date, int(limit)),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_top_domains(self, days: int = 7, limit: int = 10) -> list[dict[str, Any]]:
+        """Most requested sites over the last `days` days, with success/failure counts."""
+        since = self._since_utc(days)
+        with self._lock, self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT domain,
+                       count(*) AS downloads,
+                       sum(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS ok,
+                       sum(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS failed,
+                       coalesce(sum(size_bytes), 0) AS bytes
+                FROM downloads
+                WHERE created_at >= ?
+                GROUP BY domain
+                ORDER BY downloads DESC, bytes DESC
+                LIMIT ?
+                """,
+                (since, int(limit)),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_daily_totals(self, days: int = 7) -> list[dict[str, Any]]:
+        """Per-day download counts and bytes (from usage_daily), oldest first."""
+        since_date = self._since_utc(days)[:10]
+        with self._lock, self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT date,
+                       count(DISTINCT user_id) AS active_users,
+                       coalesce(sum(downloads_count), 0) AS downloads,
+                       coalesce(sum(bytes_downloaded), 0) AS bytes
+                FROM usage_daily
+                WHERE date >= ?
+                GROUP BY date
+                ORDER BY date ASC
+                """,
+                (since_date,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_error_stats(self, days: int = 7, limit: int = 10) -> list[dict[str, Any]]:
+        """Most common failures over the last `days` days grouped by domain and error text."""
+        since = self._since_utc(days)
+        with self._lock, self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT domain, error, count(*) AS count
+                FROM downloads
+                WHERE created_at >= ? AND status != 'ok'
+                GROUP BY domain, error
+                ORDER BY count DESC
+                LIMIT ?
+                """,
+                (since, int(limit)),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_recent_downloads(self, limit: int = 15, user_id: int | None = None) -> list[dict[str, Any]]:
+        """Newest download-history rows, optionally filtered by user."""
+        with self._lock, self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT d.id, d.user_id, u.username, u.first_name, d.chat_id, d.domain, d.url, d.title,
+                       d.size_bytes, d.duration_sec, d.status, d.error, d.created_at
+                FROM downloads d
+                LEFT JOIN users u ON u.user_id = d.user_id
+            """
+            params: list[Any] = []
+            if user_id is not None:
+                query += " WHERE d.user_id = ?"
+                params.append(user_id)
+            query += " ORDER BY d.id DESC LIMIT ?"
+            params.append(int(limit))
+            cursor.execute(query, params)
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_range_summary(self, days: int = 7) -> dict[str, Any]:
+        """Totals over the last `days` days from the download history."""
+        since = self._since_utc(days)
+        with self._lock, self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT count(*) AS downloads,
+                       sum(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS ok,
+                       sum(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS failed,
+                       coalesce(sum(size_bytes), 0) AS bytes,
+                       count(DISTINCT user_id) AS active_users
+                FROM downloads
+                WHERE created_at >= ?
+                """,
+                (since,),
+            )
+            row = cursor.fetchone()
+            return {
+                "days": int(days),
+                "downloads": (row["downloads"] if row else 0) or 0,
+                "ok": (row["ok"] if row else 0) or 0,
+                "failed": (row["failed"] if row else 0) or 0,
+                "bytes": (row["bytes"] if row else 0) or 0,
+                "active_users": (row["active_users"] if row else 0) or 0,
             }
 
 

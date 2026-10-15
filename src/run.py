@@ -22,35 +22,66 @@ def parse_args():
     parser.add_argument("--status", action="store_true", help="Check if the VideoLib launchd service is running")
     return parser.parse_args()
 
+# launchd labels: the project's own plist (scripts/install-service.sh) and the ones `brew services` uses
+SERVICE_LABELS: tuple[str, ...] = ("com.videolib.agent", "sh.brew.videolib", "homebrew.mxcl.videolib")
+
+
+def _homebrew_prefix() -> Path | None:
+    """Best-effort Homebrew prefix without shelling out: env var, then the usual locations."""
+    env = os.getenv("HOMEBREW_PREFIX")
+    candidates = [Path(env)] if env else []
+    candidates += [Path("/opt/homebrew"), Path("/usr/local")]
+    for c in candidates:
+        if (c / "bin" / "brew").exists():
+            return c
+    return None
+
+
+def _find_launchd_job() -> tuple[str | None, str | None, str | None]:
+    """Returns (label, pid, exit_status) for the first known VideoLib launchd job, or (None, None, None)."""
+    try:
+        result = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=5)
+    except FileNotFoundError:
+        return None, None, "launchctl not found"
+    except subprocess.TimeoutExpired:
+        return None, None, "launchctl timed out"
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[2] in SERVICE_LABELS:
+            pid = parts[0] if parts[0] != "-" else None
+            return parts[2], pid, parts[1]
+    return None, None, None
+
+
+def _print_log_dir(label: str, log_dir: Path) -> None:
+    if not log_dir.exists():
+        print(f"  {label}📁 {log_dir} (not created yet)")
+        return
+    log_files = sorted(log_dir.glob("*.log"))
+    print(f"  {label}📁 {log_dir} ({len(log_files)} file(s))")
+    for lf in log_files[:5]:
+        size_kb = lf.stat().st_size / 1024
+        print(f"           - {lf.name} ({size_kb:.1f} KB)")
+
+
 async def check_service_status() -> None:
-    """Check and display the status of the VideoLib launchd service."""
-    label = "com.videolib.agent"
+    """Check and display the status of the VideoLib launchd service (custom plist or brew services)."""
+    from src import __version__
+
     print(f"\n{'=' * 50}")
-    print("VideoLib Service Status")
+    print(f"VideoLib Service Status (v{__version__})")
     print(f"{'=' * 50}")
 
-    # Check if launchd job is loaded
-    try:
-        result = subprocess.run(
-            ["launchctl", "list"],
-            capture_output=True, text=True, timeout=5
-        )
-        lines = [line for line in result.stdout.splitlines() if label in line]
-        if lines:
-            parts = lines[0].split()
-            pid = parts[0] if parts[0] != "-" else None
-            status_code = parts[1] if len(parts) > 1 else "unknown"
-            if pid:
-                print(f"  Status:  ✅ Running (PID {pid})")
-            else:
-                print(f"  Status:  ⚠️  Loaded but not running (exit code: {status_code})")
-        else:
-            print("  Status:  ❌ Not loaded")
-            print("  Hint:    Run 'brew services start videolib' or load the plist manually.")
-    except FileNotFoundError:
-        print("  Status:  ❓ launchctl not found (not macOS?)")
-    except subprocess.TimeoutExpired:
-        print("  Status:  ❓ launchctl timed out")
+    label, pid, status_code = _find_launchd_job()
+    if label is None and status_code:
+        print(f"  Status:  ❓ {status_code}")
+    elif label is None:
+        print("  Status:  ❌ Not loaded")
+        print("  Hint:    Run 'brew services start videolib' or ./scripts/install-service.sh")
+    elif pid:
+        print(f"  Status:  ✅ Running (PID {pid}, launchd job {label})")
+    else:
+        print(f"  Status:  ⚠️  Loaded but not running (launchd job {label}, exit code: {status_code})")
 
     # Check config file
     env_file = os.getenv("VIDEOLIB_ENV_FILE", os.path.expanduser("~/.config/videolib/.env"))
@@ -59,18 +90,28 @@ async def check_service_status() -> None:
     else:
         print(f"  Config:  ❌ {env_file} (not found)")
 
-    # Check log files
-    log_dir = Path(os.path.expanduser("~/Library/Logs/VideoLib"))
-    if log_dir.exists():
-        log_files = list(log_dir.glob("*.log"))
-        print(f"  Logs:    📁 {log_dir} ({len(log_files)} file(s))")
-        for lf in sorted(log_files)[:5]:
-            size_kb = lf.stat().st_size / 1024
-            print(f"           - {lf.name} ({size_kb:.1f} KB)")
+    # Log locations differ by install method: custom plist vs brew services
+    brew_prefix = _homebrew_prefix()
+    is_brew = label is not None and label != "com.videolib.agent"
+    if is_brew and brew_prefix:
+        _print_log_dir("Logs:    ", brew_prefix / "var" / "log" / "videolib")
+        _print_log_dir("App log: ", brew_prefix / "var" / "lib" / "videolib" / "logs")
     else:
-        print(f"  Logs:    📁 {log_dir} (not created yet)")
+        _print_log_dir("Logs:    ", Path(os.path.expanduser("~/Library/Logs/VideoLib")))
+        if brew_prefix and (brew_prefix / "var" / "log" / "videolib").exists():
+            _print_log_dir("Brew logs:", brew_prefix / "var" / "log" / "videolib")
 
     print(f"{'=' * 50}\n")
+
+def _reexec() -> None:
+    """Replaces the current process with a fresh copy of itself (used by the admin /restart command)."""
+    logger.info("Restart requested: re-executing process...")
+    for handler in logging.getLogger("videolib").handlers:
+        try:
+            handler.flush()
+        except Exception:
+            pass
+    os.execv(sys.executable, [sys.executable, *sys.argv])
 
 async def main() -> None:
     args = parse_args()
@@ -147,8 +188,8 @@ async def main() -> None:
     for platform in orchestrator.platforms.values():
         await platform.start()
 
-    # Handle shutdown signals gracefully
-    shutdown_event = asyncio.Event()
+    # Handle shutdown signals gracefully (admin /restart sets the same event via Orchestrator.request_shutdown)
+    shutdown_event = orchestrator.shutdown_event
     loop = asyncio.get_running_loop()
 
     def signal_handler():
@@ -173,6 +214,8 @@ async def main() -> None:
         if stop_tasks:
             await asyncio.gather(*stop_tasks, return_exceptions=True)
         logger.info("VideoLib has been successfully stopped.")
+        if orchestrator.restart_requested:
+            _reexec()
 
 def main_sync() -> None:
     """Synchronous entry point for console_scripts."""
