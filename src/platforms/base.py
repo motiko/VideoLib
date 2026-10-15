@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Callable, Coroutine, Any
+from typing import Callable, Coroutine, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover
+    from src.core.orchestrator import Orchestrator
 
 # Type alias for message handler callbacks
 # Callback receives: (platform_name, chat_id, message_id, url, user_id=...)
@@ -12,6 +15,8 @@ class BasePlatform(ABC):
     def __init__(self, name: str):
         self.name = name
         self.message_callback: MessageCallback | None = None
+        # Set by Orchestrator.register_platform; lets platform admin commands read runtime state
+        self.orchestrator: "Orchestrator | None" = None
 
     def register_callback(self, callback: MessageCallback) -> None:
         """Registers a callback function to handle incoming video download requests."""
@@ -58,4 +63,8 @@ class BasePlatform(ABC):
     ) -> None:
         """Sends a video file to a specific chat/user."""
         pass
+
+    async def send_document(self, chat_id: str, file_path: Path, caption: str | None = None) -> None:
+        """Sends an arbitrary file as a document. Optional; platforms without file support raise."""
+        raise NotImplementedError(f"Platform '{self.name}' does not support sending documents.")
 

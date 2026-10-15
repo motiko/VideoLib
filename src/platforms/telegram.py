@@ -7,6 +7,7 @@ from telegram import Update, InputFile, LinkPreviewOptions
 from telegram.constants import ChatType
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from src.platforms.base import BasePlatform
+from src.platforms.telegram_admin import TelegramAdminOpsMixin
 from src.utils.logger import logger
 from src.utils.progress import ProgressFileReader
 from src.config import config
@@ -14,7 +15,7 @@ from src.core.access import access_manager
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
-class TelegramPlatform(BasePlatform):
+class TelegramPlatform(TelegramAdminOpsMixin, BasePlatform):
     """Platform adapter for Telegram using python-telegram-bot."""
 
     def __init__(self, token: str):
@@ -63,6 +64,18 @@ class TelegramPlatform(BasePlatform):
         self.application.add_handler(CommandHandler("adminhelp", self._handle_adminhelp))
         self.application.add_handler(CommandHandler("debug_upload", self._handle_debug_upload))
 
+        # Admin operations commands (see TelegramAdminOpsMixin)
+        self.application.add_handler(CommandHandler("uptime", self._handle_uptime))
+        self.application.add_handler(CommandHandler("status", self._handle_status))
+        self.application.add_handler(CommandHandler("queue", self._handle_queue))
+        self.application.add_handler(CommandHandler("active", self._handle_queue))
+        self.application.add_handler(CommandHandler("logs", self._handle_logs))
+        self.application.add_handler(CommandHandler("stats", self._handle_stats))
+        self.application.add_handler(CommandHandler("history", self._handle_history))
+        self.application.add_handler(CommandHandler("restart", self._handle_restart))
+        self.application.add_handler(CommandHandler("ytdlp", self._handle_ytdlp))
+        self.application.add_handler(CommandHandler("broadcast", self._handle_broadcast))
+
         # Add handler for general text messages containing URLs
         self.application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
@@ -73,6 +86,7 @@ class TelegramPlatform(BasePlatform):
         await self.application.start()
         await self.application.updater.start_polling(drop_pending_updates=True)
         logger.info("TelegramPlatform: Bot polling started successfully.")
+        await self._send_restart_notice()
 
     async def stop(self) -> None:
         """Shuts down the polling client cleanly."""
@@ -211,6 +225,24 @@ class TelegramPlatform(BasePlatform):
             logger.info(f"TelegramPlatform: Successfully sent video {file_path} to {chat_id}")
         except Exception as e:
             logger.error(f"TelegramPlatform: Failed to send video {file_path} to {chat_id}: {e}")
+            raise
+
+    async def send_document(self, chat_id: str, file_path: Path, caption: str | None = None) -> None:
+        """Uploads an arbitrary file (e.g. a log) as a document."""
+        if not self.application:
+            raise RuntimeError("Telegram application is not running.")
+        try:
+            with open(file_path, "rb") as fh:
+                await self.application.bot.send_document(
+                    chat_id=chat_id,
+                    document=InputFile(fh, filename=file_path.name),
+                    caption=caption,
+                    read_timeout=120.0,
+                    write_timeout=120.0,
+                    connect_timeout=60.0,
+                )
+        except Exception as e:
+            logger.error(f"TelegramPlatform: Failed to send document {file_path} to {chat_id}: {e}")
             raise
 
     async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -759,6 +791,17 @@ class TelegramPlatform(BasePlatform):
             "• <code>/adjustlimits &lt;@user | id&gt; reset</code> - Reset to tier defaults\n"
             "• <code>/showusage [@user | id]</code> - Inspect user or overall traffic summary\n"
             "• <code>/resetusage &lt;@user | id&gt;</code> - Reset user's usage for today\n\n"
+            "<b>Operations:</b>\n"
+            "• <code>/status</code> - Health overview (uptime, queue, disk, yt-dlp)\n"
+            "• <code>/uptime</code> - Uptime, PID, version\n"
+            "• <code>/queue</code> - Downloads currently in progress\n"
+            "• <code>/logs [tail|errors] [n]</code> - Recent log lines\n"
+            "• <code>/logs upload</code> / <code>/logs failures</code> / <code>/logs failure latest</code>\n"
+            "• <code>/stats [top_users|sites|daily|errors] [days] [n]</code> - Usage statistics\n"
+            "• <code>/history [@user | id] [n]</code> - Recent downloads\n"
+            "• <code>/ytdlp [update]</code> - Show or update the yt-dlp version\n"
+            "• <code>/broadcast &lt;text&gt;</code> - Message every known user (needs confirm)\n"
+            "• <code>/restart [force]</code> - Restart the bot process\n\n"
             "<i>Tip: You can also reply directly to any user's message with these commands!</i>"
         )
         await self.send_message(chat_id, help_text)
@@ -824,36 +867,3 @@ class TelegramPlatform(BasePlatform):
             )
         else:
             logger.warning("TelegramPlatform: Message received, but no callback registered.")
-
-    async def _handle_debug_upload(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Admin command to re-send a file from DOWNLOAD_DIR: /debug_upload <file>. Paths outside it are refused."""
-        chat_id = str(update.effective_chat.id)
-        if not self._require_admin(update):
-            await self.send_message(chat_id, "⛔ This command is restricted to bot administrators.")
-            return
-
-        if not context.args:
-            await self.send_message(chat_id, "⚠️ Please provide a file name inside the download directory to retry upload.")
-            return
-
-        file_path = Path(" ".join(context.args))
-        if not file_path.is_absolute():
-            file_path = config.DOWNLOAD_DIR / file_path
-
-        # Confine to the download directory (blocks absolute paths and ".." traversal)
-        try:
-            file_path.resolve().relative_to(config.DOWNLOAD_DIR.resolve())
-        except ValueError:
-            await self.send_message(chat_id, "⛔ Only files inside the download directory can be uploaded.")
-            return
-
-        if not file_path.is_file():
-            await self.send_message(chat_id, f"⚠️ File not found: {file_path.name}")
-            return
-
-        await self.send_message(chat_id, f"📤 Retrying upload for {file_path.name}...")
-        try:
-            await self.send_video(chat_id, file_path, caption=f"Debug upload: {file_path.name}")
-        except Exception as e:
-            await self.send_message(chat_id, f"❌ Upload failed: {e}")
-

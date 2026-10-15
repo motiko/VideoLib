@@ -45,3 +45,49 @@ def test_parse_args():
         assert args.cli is False
         assert args.debug is True
         assert args.keep_files is True
+
+
+def test_reexec_uses_same_interpreter_and_argv(monkeypatch):
+    import sys
+    from src import run as run_mod
+    calls = []
+    monkeypatch.setattr(run_mod.os, "execv", lambda exe, argv: calls.append((exe, argv)))
+    run_mod._reexec()
+    assert calls == [(sys.executable, [sys.executable, *sys.argv])]
+
+
+def _launchctl(stdout: str):
+    from unittest.mock import MagicMock
+    return MagicMock(return_value=MagicMock(stdout=stdout))
+
+
+@pytest.mark.asyncio
+async def test_status_detects_brew_service(capsys, monkeypatch, tmp_path):
+    from src import run as run_mod
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "brew").write_text("")
+    logs = tmp_path / "var" / "log" / "videolib"
+    logs.mkdir(parents=True)
+    (logs / "videolib.log").write_text("x")
+    monkeypatch.setenv("HOMEBREW_PREFIX", str(tmp_path))
+    monkeypatch.setattr(run_mod.subprocess, "run", _launchctl("80343\t0\tsh.brew.videolib\n123\t0\tcom.apple.foo\n"))
+
+    await run_mod.check_service_status()
+    out = capsys.readouterr().out
+    assert "Running (PID 80343, launchd job sh.brew.videolib)" in out
+    assert str(logs) in out and "1 file(s)" in out
+
+
+@pytest.mark.asyncio
+async def test_status_detects_custom_plist_and_not_loaded(capsys, monkeypatch, tmp_path):
+    from src import run as run_mod
+    monkeypatch.setenv("HOMEBREW_PREFIX", str(tmp_path))  # no brew binary here
+    monkeypatch.setattr(run_mod.subprocess, "run", _launchctl("-\t1\tcom.videolib.agent\n"))
+    await run_mod.check_service_status()
+    out = capsys.readouterr().out
+    assert "Loaded but not running (launchd job com.videolib.agent, exit code: 1)" in out
+
+    monkeypatch.setattr(run_mod.subprocess, "run", _launchctl("123\t0\tcom.apple.foo\n"))
+    await run_mod.check_service_status()
+    out = capsys.readouterr().out
+    assert "Not loaded" in out

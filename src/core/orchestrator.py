@@ -2,8 +2,11 @@ import asyncio
 import contextlib
 import inspect
 import time
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from src.config import config
+from src.core.access import access_manager
 from src.core.errors import classify_download_error, classify_upload_error, format_error_message
 from src.downloader.shell_runner import shell_runner, DownloadError
 from src.storage.manager import storage_manager
@@ -21,6 +24,24 @@ from src.utils.progress import (
     DownloadProgress,
 )
 
+@dataclass
+class ActiveDownload:
+    """In-flight request tracked for the admin /queue and /status views."""
+
+    platform: str
+    chat_id: str
+    message_id: str
+    url: str
+    user_id: int | None = None
+    title: str | None = None
+    stage: str = "queued"  # queued | downloading | uploading
+    started_at: float = field(default_factory=time.monotonic)
+
+    @property
+    def elapsed(self) -> float:
+        return time.monotonic() - self.started_at
+
+
 class Orchestrator:
     """Coordinates downloading tasks and routes messages between the platforms, downloader, and storage manager."""
 
@@ -28,11 +49,28 @@ class Orchestrator:
         self.platforms: dict[str, BasePlatform] = {}
         # Concurrency semaphore to throttle concurrent download tasks
         self.semaphore = asyncio.Semaphore(config.MAX_CONCURRENT_DOWNLOADS)
+        # Runtime state exposed to admin commands
+        self.started_at = datetime.now(timezone.utc)
+        self._start_monotonic = time.monotonic()
+        self.active: dict[str, ActiveDownload] = {}
+        self.shutdown_event = asyncio.Event()
+        self.restart_requested = False
+
+    def uptime_seconds(self) -> float:
+        """Seconds since this orchestrator was created (process start for all practical purposes)."""
+        return time.monotonic() - self._start_monotonic
+
+    def request_shutdown(self, restart: bool = False) -> None:
+        """Signals the main loop to stop; with restart=True the process re-execs itself after stopping."""
+        self.restart_requested = self.restart_requested or restart
+        self.shutdown_event.set()
+        logger.info(f"Orchestrator: Shutdown requested (restart={self.restart_requested}).")
 
     def register_platform(self, platform: BasePlatform) -> None:
         """Registers a platform adapter (e.g. TelegramPlatform) and binds the orchestrator callback."""
         self.platforms[platform.name] = platform
         platform.register_callback(self.handle_request)
+        platform.orchestrator = self
         logger.info(f"Orchestrator: Registered platform adapter '{platform.name}'")
 
     async def handle_request(
@@ -58,6 +96,13 @@ class Orchestrator:
 
         file_path: Path | None = None
         status_msg_id: str | None = None
+        active_key = f"{platform_name}:{chat_id}:{message_id}"
+        active = ActiveDownload(platform_name, chat_id, message_id, url, user_id=user_id)
+        self.active[active_key] = active
+        request_start = time.monotonic()
+        file_size_bytes = 0
+        history_status: str | None = None
+        history_error: str | None = None
 
         try:
             # Let the user know the bot is waiting for a slot in the concurrency queue if locked
@@ -72,6 +117,8 @@ class Orchestrator:
                     title = await res if inspect.isawaitable(res) else res
                 except Exception as e:
                     logger.debug(f"Orchestrator: Could not extract title: {e}")
+                active.title = title
+                active.stage = "downloading"
 
                 # 2. Starting actual download: Lightning reaction
                 await platform.react_to_message(chat_id, message_id, "⚡")
@@ -120,6 +167,7 @@ class Orchestrator:
                 )
 
                 # 3. Download finished, starting upload: Rocket reaction
+                active.stage = "uploading"
                 await platform.react_to_message(chat_id, message_id, "🚀")
 
                 # Deliver the file with background estimated upload ticker
@@ -161,8 +209,8 @@ class Orchestrator:
                     actual_speed = upload_speed_estimator.get_speed_bps()
 
                 if user_id and file_size_bytes > 0:
-                    from src.core.access import access_manager
                     access_manager.record_download(user_id, file_size_bytes)
+                history_status = "ok"
 
                 # Complete status message at 100% if status message still exists
                 if status_msg_id and file_size_bytes > 0:
@@ -179,6 +227,7 @@ class Orchestrator:
                     )
 
         except DownloadError as de:
+            history_status, history_error = "failed", str(de)
             logger.warning(f"Orchestrator: Download failed for {url} in chat {chat_id}: {de}")
             user_error = classify_download_error(str(de))
             error_text = format_error_message(user_error)
@@ -188,6 +237,7 @@ class Orchestrator:
                 await platform.send_message(chat_id, error_text, reply_to_message_id=message_id)
             await platform.react_to_message(chat_id, message_id, "👎")
         except Exception as e:
+            history_status, history_error = "failed", str(e)
             logger.exception(f"Orchestrator: Unexpected exception occurred handling URL {url} in chat {chat_id}: {e}")
             user_error = classify_upload_error(str(e))
             error_text = format_error_message(user_error)
@@ -197,6 +247,21 @@ class Orchestrator:
                 await platform.send_message(chat_id, error_text, reply_to_message_id=message_id)
             await platform.react_to_message(chat_id, message_id, "👎")
         finally:
+            self.active.pop(active_key, None)
+            if history_status:
+                try:
+                    access_manager.record_download_event(
+                        user_id=user_id,
+                        chat_id=chat_id,
+                        url=url,
+                        title=active.title,
+                        size_bytes=file_size_bytes,
+                        duration_sec=time.monotonic() - request_start,
+                        status=history_status,
+                        error=history_error,
+                    )
+                except Exception as hist_err:
+                    logger.debug(f"Orchestrator: Could not record download history: {hist_err}")
             # Guarantee cleanup of files to prevent filling up the disk
             if file_path:
                 await storage_manager.cleanup(file_path)

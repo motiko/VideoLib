@@ -284,6 +284,23 @@ DB_PATH=data/videolib.db
 * `/resetusage <@user | user_id>`: Reset a user's daily usage counters to zero.
 * `/adminhelp`: View the complete administrator command cheatsheet.
 
+#### Operations (Administrators)
+* `/status`: Health overview: uptime, version, yt-dlp version, running/queued downloads, disk free, temp files, log/DB size, public access, today's totals.
+* `/uptime`: Uptime, PID, and version.
+* `/queue` (alias: `/active`): Downloads currently in progress (stage, elapsed time, user).
+* `/logs`, `/stats`, `/history`, and `/queue` only work in a private chat with the bot, so logs and user data are never posted into a group.
+* `/logs [tail] [n]` / `/logs errors [n]`: Last `n` log lines (default 30, max 200) or only warnings/errors.
+* `/logs upload`: Send the current `videolib.log` as a file.
+* `/logs failures [n]` / `/logs failure <name|latest>`: List or send yt-dlp failure reports from `LOG_DIR/failures`.
+* `/stats [days]`: Overview for the last N days (default 7). Sub-commands: `/stats top_users [days] [n]`, `/stats sites [days] [n]`, `/stats daily [days]`, `/stats errors [days] [n]`.
+* `/history [@user | user_id] [n]`: Recent downloads, optionally for one user (or reply to their message). Numbers below 1000 are treated as the row count.
+* `/ytdlp [version|update]`: Show the yt-dlp version or update it (self-updater, falling back to Homebrew or pip).
+* `/broadcast <text>`: Preview a message to every user who has messaged the bot; `/broadcast confirm` sends it, `/broadcast cancel` discards it.
+* `/restart [force]`: Gracefully stop and re-exec the bot (refuses while downloads are active unless `force`). The requesting chat gets a "back online" message afterwards.
+* `/debug_upload <file>`: Re-send a file from `DOWNLOAD_DIR` as a video (admin only; paths outside the download directory are refused).
+
+Download history (used by `/stats` and `/history`) stores only the site domain by default. Set `STORE_FULL_URLS=true` to also keep full URLs and titles.
+
 ---
 
 ## 📄 License

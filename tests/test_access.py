@@ -210,3 +210,94 @@ def test_group_access_control(temp_access_manager):
     can_dl, _ = mgr.check_can_download(user_id, chat_id=group_id)
     assert can_dl is False
 
+
+
+# ---------------------------------------------------------------------------
+# Download history & stats
+# ---------------------------------------------------------------------------
+
+def test_record_download_event_domain_only_by_default(temp_access_manager, monkeypatch):
+    from src.core import access as access_mod
+    monkeypatch.setattr(access_mod.config, "STORE_FULL_URLS", False)
+    mgr = temp_access_manager
+    mgr.record_user(1, "alice", "Alice")
+    mgr.record_download_event(
+        user_id=1, chat_id=1, url="https://www.youtube.com/watch?v=abc", title="Cat video",
+        size_bytes=1024, duration_sec=2.5, status="ok",
+    )
+    rows = mgr.get_recent_downloads(limit=10)
+    assert len(rows) == 1
+    assert rows[0]["domain"] == "youtube.com"
+    assert rows[0]["url"] is None
+    assert rows[0]["title"] is None
+    assert rows[0]["status"] == "ok"
+    assert rows[0]["username"] == "alice"
+
+
+def test_record_download_event_stores_full_url_when_enabled(temp_access_manager, monkeypatch):
+    from src.core import access as access_mod
+    monkeypatch.setattr(access_mod.config, "STORE_FULL_URLS", True)
+    mgr = temp_access_manager
+    mgr.record_download_event(
+        user_id=1, chat_id=1, url="https://m.tiktok.com/v/1", title="T",
+        size_bytes=1, duration_sec=1.0, status="failed", error="x" * 500,
+    )
+    row = mgr.get_recent_downloads(limit=1)[0]
+    assert row["domain"] == "tiktok.com"
+    assert row["url"] == "https://m.tiktok.com/v/1"
+    assert row["title"] == "T"
+    assert len(row["error"]) == 200
+
+
+def test_stats_queries(temp_access_manager):
+    mgr = temp_access_manager
+    mgr.record_user(1, "alice", "Alice")
+    mgr.record_user(2, "bob", "Bob")
+    for _ in range(3):
+        mgr.record_download(1, 100)
+        mgr.record_download_event(1, 1, "https://youtube.com/a", None, 100, 1.0, "ok")
+    mgr.record_download(2, 50)
+    mgr.record_download_event(2, 2, "https://vimeo.com/b", None, 50, 1.0, "ok")
+    mgr.record_download_event(2, 2, "https://vimeo.com/c", None, 0, 1.0, "failed", error="boom")
+
+    top_users = mgr.get_top_users(days=7, limit=10)
+    assert top_users[0]["user_id"] == 1
+    assert top_users[0]["downloads"] == 3
+    assert top_users[0]["bytes"] == 300
+    assert top_users[0]["username"] == "alice"
+
+    domains = mgr.get_top_domains(days=7, limit=10)
+    assert domains[0]["domain"] == "youtube.com"
+    assert domains[0]["downloads"] == 3
+    assert domains[1]["domain"] == "vimeo.com"
+    assert domains[1]["downloads"] == 2
+    assert domains[1]["failed"] == 1
+
+    daily = mgr.get_daily_totals(days=7)
+    assert len(daily) == 1
+    assert daily[0]["downloads"] == 4
+    assert daily[0]["bytes"] == 350
+
+    errors = mgr.get_error_stats(days=7, limit=5)
+    assert errors == [{"domain": "vimeo.com", "error": "boom", "count": 1}]
+
+    recent_for_bob = mgr.get_recent_downloads(limit=5, user_id=2)
+    assert len(recent_for_bob) == 2
+    assert recent_for_bob[0]["status"] == "failed"  # newest first
+
+    summary = mgr.get_range_summary(days=7)
+    assert summary == {"days": 7, "downloads": 5, "ok": 4, "failed": 1, "bytes": 350, "active_users": 2}
+
+
+def test_get_all_users_and_settings(temp_access_manager):
+    mgr = temp_access_manager
+    mgr.record_user(10, "u1", "U1")
+    mgr.record_user(11, None, "U2")
+    users = mgr.get_all_users()
+    assert {u["user_id"] for u in users} == {10, 11}
+
+    assert mgr.get_setting("pending_restart_notify") is None
+    mgr.set_setting("pending_restart_notify", "123")
+    assert mgr.get_setting("pending_restart_notify") == "123"
+    mgr.delete_setting("pending_restart_notify")
+    assert mgr.get_setting("pending_restart_notify") is None
