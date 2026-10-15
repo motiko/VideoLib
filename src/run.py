@@ -10,6 +10,7 @@ from src.config import config
 from src.utils.logger import logger, setup_logger
 from src.storage.manager import storage_manager
 from src.core.orchestrator import Orchestrator
+from src.core.auto_update import AutoUpdater
 from src.platforms.telegram import TelegramPlatform
 from src.platforms.cli import CliPlatform
 
@@ -111,7 +112,20 @@ def _reexec() -> None:
             handler.flush()
         except Exception:
             pass
-    os.execv(sys.executable, [sys.executable, *sys.argv])
+    os.execv(*_reexec_target())
+
+
+def _reexec_target() -> tuple[str, list[str]]:
+    """Picks what to exec on restart.
+
+    Under a packaged install (Homebrew) argv[0] is the stable `videolib` launcher, whose shebang follows the
+    currently installed version, whereas sys.executable points into a versioned keg that a self-update
+    may already have replaced. Prefer the launcher; fall back to the interpreter for `python run.py`-style runs.
+    """
+    argv0 = sys.argv[0] if sys.argv else ""
+    if argv0 and not argv0.endswith(".py") and os.path.isfile(argv0) and os.access(argv0, os.X_OK):
+        return argv0, list(sys.argv)
+    return sys.executable, [sys.executable, *sys.argv]
 
 async def main() -> None:
     args = parse_args()
@@ -188,6 +202,12 @@ async def main() -> None:
     for platform in orchestrator.platforms.values():
         await platform.start()
 
+    # Optional self-updater (AUTO_UPDATE=true): checks GitHub releases and upgrades + restarts when idle
+    auto_updater: AutoUpdater | None = None
+    if config.AUTO_UPDATE:
+        auto_updater = AutoUpdater(orchestrator, config.ADMIN_USERS, interval_s=config.AUTO_UPDATE_CHECK_HOURS * 3600)
+        auto_updater.start()
+
     # Handle shutdown signals gracefully (admin /restart sets the same event via Orchestrator.request_shutdown)
     shutdown_event = orchestrator.shutdown_event
     loop = asyncio.get_running_loop()
@@ -210,6 +230,8 @@ async def main() -> None:
         pass
     finally:
         logger.info("Initiating graceful shutdown...")
+        if auto_updater:
+            await auto_updater.stop()
         stop_tasks = [platform.stop() for platform in orchestrator.platforms.values()]
         if stop_tasks:
             await asyncio.gather(*stop_tasks, return_exceptions=True)

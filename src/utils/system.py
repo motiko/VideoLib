@@ -1,6 +1,7 @@
 """Host/system introspection helpers for admin status commands (uptime, disk, yt-dlp)."""
 
 import asyncio
+import os
 import shlex
 import shutil
 import sys
@@ -74,12 +75,14 @@ def ytdlp_binary() -> str:
     return tokens[0] if tokens else "yt-dlp"
 
 
-async def _run(args: list[str], timeout: float) -> tuple[int, str]:
-    """Runs a command without a shell; returns (exit_code, combined output)."""
+async def run_command(args: list[str], timeout: float, env: dict[str, str] | None = None) -> tuple[int, str]:
+    """Runs a command without a shell; returns (exit_code, combined output). `env` adds to the inherited environment."""
+    full_env = {**os.environ, **env} if env else None
     proc = await asyncio.create_subprocess_exec(
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
+        env=full_env,
     )
     try:
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -93,7 +96,7 @@ async def _run(args: list[str], timeout: float) -> tuple[int, str]:
 async def get_ytdlp_version() -> str:
     """Returns the downloader's reported version, or 'unknown'."""
     try:
-        code, out = await _run([ytdlp_binary(), "--version"], timeout=20.0)
+        code, out = await run_command([ytdlp_binary(), "--version"], timeout=20.0)
     except (FileNotFoundError, OSError) as e:
         logger.debug(f"System: yt-dlp version check failed: {e}")
         return "unknown"
@@ -116,7 +119,7 @@ async def update_ytdlp() -> tuple[bool, str]:
     """Updates yt-dlp via its self-updater, falling back to brew or pip when it is package-managed."""
     binary = ytdlp_binary()
     try:
-        code, out = await _run([binary, "-U"], timeout=300.0)
+        code, out = await run_command([binary, "-U"], timeout=300.0)
     except (FileNotFoundError, OSError) as e:
         return False, f"Could not run {binary}: {e}"
 
@@ -131,7 +134,7 @@ async def update_ytdlp() -> tuple[bool, str]:
         args = [sys.executable, "-m", "pip", "install", "-U", "yt-dlp"]
     logger.info(f"System: yt-dlp self-update unavailable, falling back to: {' '.join(args)}")
     try:
-        code2, out2 = await _run(args, timeout=300.0)
+        code2, out2 = await run_command(args, timeout=300.0)
     except (FileNotFoundError, OSError) as e:
         return False, f"{out.strip()}\n\nFallback failed: {e}"
     combined = (out.strip() + "\n\n" + out2.strip()).strip()

@@ -47,13 +47,28 @@ def test_parse_args():
         assert args.keep_files is True
 
 
-def test_reexec_uses_same_interpreter_and_argv(monkeypatch):
+def test_reexec_uses_same_interpreter_for_script_runs(monkeypatch):
     import sys
     from src import run as run_mod
     calls = []
     monkeypatch.setattr(run_mod.os, "execv", lambda exe, argv: calls.append((exe, argv)))
+    monkeypatch.setattr(sys, "argv", ["run.py", "--debug"])
     run_mod._reexec()
-    assert calls == [(sys.executable, [sys.executable, *sys.argv])]
+    assert calls == [(sys.executable, [sys.executable, "run.py", "--debug"])]
+
+
+def test_reexec_prefers_console_script_launcher(monkeypatch, tmp_path):
+    """Packaged installs (Homebrew) must re-exec the stable launcher, not the versioned interpreter path."""
+    import sys
+    from src import run as run_mod
+    launcher = tmp_path / "videolib"
+    launcher.write_text("#!/usr/bin/env python3\n")
+    launcher.chmod(0o755)
+    calls = []
+    monkeypatch.setattr(run_mod.os, "execv", lambda exe, argv: calls.append((exe, argv)))
+    monkeypatch.setattr(sys, "argv", [str(launcher), "--debug"])
+    run_mod._reexec()
+    assert calls == [(str(launcher), [str(launcher), "--debug"])]
 
 
 def _launchctl(stdout: str):

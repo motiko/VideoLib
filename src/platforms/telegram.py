@@ -74,6 +74,7 @@ class TelegramPlatform(TelegramAdminOpsMixin, BasePlatform):
         self.application.add_handler(CommandHandler("history", self._handle_history))
         self.application.add_handler(CommandHandler("restart", self._handle_restart))
         self.application.add_handler(CommandHandler("ytdlp", self._handle_ytdlp))
+        self.application.add_handler(CommandHandler("update", self._handle_update))
         self.application.add_handler(CommandHandler("broadcast", self._handle_broadcast))
 
         # Add handler for general text messages containing URLs
@@ -800,6 +801,7 @@ class TelegramPlatform(TelegramAdminOpsMixin, BasePlatform):
             "• <code>/stats [top_users|sites|daily|errors] [days] [n]</code> - Usage statistics\n"
             "• <code>/history [@user | id] [n]</code> - Recent downloads\n"
             "• <code>/ytdlp [update]</code> - Show or update the yt-dlp version\n"
+            "• <code>/update [now [force]]</code> - Check for a new VideoLib release, or install it and restart\n"
             "• <code>/broadcast &lt;text&gt;</code> - Message every known user (needs confirm)\n"
             "• <code>/restart [force]</code> - Restart the bot process\n\n"
             "<i>Tip: You can also reply directly to any user's message with these commands!</i>"
